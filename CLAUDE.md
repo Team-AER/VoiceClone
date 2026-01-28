@@ -386,6 +386,51 @@ python quantize_int4.py \
 
 ---
 
+## Model Export Options
+
+### Option 1: Simplified Talker (current custom path)
+
+Exports a simplified talker that maps text tokens directly to audio codes without the full generate pipeline. This keeps the CoreML interface stable (`input_ids` -> `audio_codes`) and lets the app run end-to-end, but audio quality and fidelity are not production-grade.
+
+```bash
+# Export simplified talker + real speech decoder
+python export_onnx.py \
+    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
+    --output ./onnx_models \
+    --simple
+```
+
+If ONNX export fails, convert directly from PyTorch:
+
+```bash
+# Convert simplified talker directly to CoreML
+python convert_coreml.py \
+    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
+    --simple \
+    --output ./coreml_models/Qwen3TTS_VoiceDesign.mlpackage
+
+# Convert speech decoder directly to CoreML
+python convert_coreml.py \
+    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
+    --decoder \
+    --output ./coreml_models/Qwen3TTS_SpeechDecoder.mlpackage
+```
+
+Current blockers:
+- ONNX export can fail with `aten::__ior__` (masking op) in PyTorch 2.3.
+- PyTorch → CoreML conversion for the talker can produce an `.mlpackage` that fails to build an execution plan at runtime (CoreML error -5).
+- Speech decoder conversion currently fails on dynamic padding in CoreML.
+
+### Option 2: Official Qwen3-TTS Export (future/official path)
+
+When Qwen publishes a supported ONNX/CoreML export (or a documented TorchScript path), use it instead of the simplified wrapper. This path should preserve the intended generate logic, codec predictor behavior, and audio quality. It will likely require:
+
+- An exportable generate path (or dedicated inference graph) from Qwen
+- Stable input/output contracts for audio codes and decoder
+- Corresponding updates to `TTSInferenceEngine` to match the official outputs
+
+---
+
 ## Debugging Tips
 
 ### CoreML Issues
