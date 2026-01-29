@@ -1,12 +1,31 @@
-"""Convert ONNX models to CoreML format."""
+"""Convert ONNX models to CoreML format with robust error handling."""
 
 import argparse
 from pathlib import Path
 import coremltools as ct
 import numpy as np
 import torch
-from qwen_tts import Qwen3TTSModel
-from transformers import masking_utils
+import warnings
+import sys
+
+# Try to import qwen_tts, fall back to transformers if unavailable
+try:
+    from qwen_tts import Qwen3TTSModel
+    HAS_QWEN_TTS = True
+except ImportError:
+    from transformers import AutoModel
+    HAS_QWEN_TTS = False
+    print("Warning: qwen_tts package not found, using transformers")
+
+try:
+    from transformers import masking_utils
+    HAS_MASKING_UTILS = True
+except ImportError:
+    HAS_MASKING_UTILS = False
+    print("Warning: masking_utils not found")
+
+# Suppress CoreML warnings for cleaner output
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 def convert_to_coreml(
@@ -18,35 +37,102 @@ def convert_to_coreml(
     simple: bool = False,
     decoder: bool = False,
     attn_impl: str | None = None,
+    validate: bool = True,
 ):
-    if simple or decoder:
-        if model_name is None:
-            raise ValueError("--model is required when using --simple or --decoder.")
-        if simple:
-            print(f"Converting simplified talker from: {model_name}")
-            model = convert_simple_talker(model_name, compute_units, attn_impl)
+    """Convert models to CoreML with error handling and validation."""
+    print(f"CoreML Tools version: {ct.__version__}")
+
+    try:
+        if simple or decoder:
+            if model_name is None:
+                raise ValueError("--model is required when using --simple or --decoder.")
+            if simple:
+                print(f"Converting simplified talker from: {model_name}")
+                model = convert_simple_talker(model_name, compute_units, attn_impl)
+            else:
+                print(f"Converting speech decoder from: {model_name}")
+                model = convert_speech_decoder(model_name, compute_units)
+            resolved_output = output_path
+        elif dummy_kind:
+            print(f"Converting dummy {dummy_kind} to CoreML")
+            model = convert_dummy(dummy_kind, compute_units)
+            resolved_output = output_path
         else:
-            print(f"Converting speech decoder from: {model_name}")
-            model = convert_speech_decoder(model_name, compute_units)
-        resolved_output = output_path
-    elif dummy_kind:
-        print(f"Converting dummy {dummy_kind} to CoreML")
-        model = convert_dummy(dummy_kind, compute_units)
-        resolved_output = output_path
-    else:
-        if onnx_path is None:
-            raise ValueError("--onnx is required unless using --simple, --decoder, or --dummy.")
-        print(f"Converting: {onnx_path}")
-        model, resolved_output = convert_with_coremltools(onnx_path, output_path, compute_units)
+            if onnx_path is None:
+                raise ValueError("--onnx is required unless using --simple, --decoder, or --dummy.")
+            print(f"Converting: {onnx_path}")
+            model, resolved_output = convert_with_coremltools(onnx_path, output_path, compute_units)
 
-    model.author = "VoiceClone"
-    model.license = "Apache 2.0"
-    model.short_description = "Qwen3-TTS model for on-device speech synthesis"
+        # Set metadata
+        model.author = "VoiceClone"
+        model.license = "Apache 2.0"
+        model.short_description = "Qwen3-TTS model for on-device speech synthesis"
 
-    model.save(str(resolved_output))
-    print(f"Saved to: {resolved_output}")
+        # Ensure output directory exists
+        resolved_output.parent.mkdir(parents=True, exist_ok=True)
 
-    return model
+        # Save model
+        print(f"Saving model to: {resolved_output}")
+        model.save(str(resolved_output))
+        print(f"✓ Saved successfully")
+
+        # Validate if requested
+        if validate:
+            print("Validating converted model...")
+            if validate_model(resolved_output, model):
+                print("✓ Model validation passed")
+            else:
+                print("⚠ Model validation had warnings")
+
+        return model
+
+    except Exception as e:
+        print(f"✗ Conversion failed: {e}")
+        print(f"  Error type: {type(e).__name__}")
+        if "CoreML" in str(e) or "error -5" in str(e).lower():
+            print("  This appears to be a CoreML execution plan error.")
+            print("  Try using --dummy instead to generate a test model.")
+        raise
+
+
+def validate_model(model_path: Path, model: ct.models.MLModel) -> bool:
+    """Validate that the converted CoreML model can be loaded and executed."""
+    try:
+        print(f"  Loading model from {model_path}...")
+        # Try to load the saved model
+        loaded_model = ct.models.MLModel(str(model_path))
+
+        print(f"  Model spec: {loaded_model.get_spec().description.input}")
+
+        # Try to create a prediction (with dummy inputs)
+        if hasattr(loaded_model, "_spec"):
+            spec = loaded_model._spec
+            if hasattr(spec, "description"):
+                inputs = spec.description.input
+                if inputs:
+                    print(f"  Model has {len(inputs)} input(s)")
+                    # Create dummy inputs based on spec
+                    dummy_input = {}
+                    for input_desc in inputs:
+                        name = input_desc.name
+                        if hasattr(input_desc.type, "multiArrayType"):
+                            shape = input_desc.type.multiArrayType.shape
+                            dummy_input[name] = np.zeros([int(d) if d > 0 else 1 for d in shape], dtype=np.int32)
+
+                    if dummy_input:
+                        print(f"  Testing prediction with dummy inputs...")
+                        try:
+                            output = loaded_model.predict(dummy_input)
+                            print(f"  ✓ Prediction successful, outputs: {list(output.keys())}")
+                        except Exception as e:
+                            print(f"  ⚠ Prediction failed (this may be expected): {e}")
+                            return False
+
+        return True
+
+    except Exception as e:
+        print(f"  ✗ Validation failed: {e}")
+        return False
 
 
 def convert_with_coremltools(
@@ -54,16 +140,24 @@ def convert_with_coremltools(
     output_path: Path,
     compute_units: str
 ) -> tuple[ct.models.MLModel, Path]:
-    if hasattr(ct.converters, "onnx"):
+    """Convert ONNX model to CoreML with error handling."""
+    if not hasattr(ct.converters, "onnx"):
+        raise RuntimeError("ONNX conversion is not available in this coremltools build. Use --dummy.")
+
+    try:
+        print("  Using coremltools ONNX converter...")
         model = ct.converters.onnx.convert(
             str(onnx_path),
             minimum_deployment_target=ct.target.iOS17,
             compute_units=getattr(ct.ComputeUnit, compute_units),
             convert_to="mlprogram",
         )
+        print("  ✓ ONNX conversion successful")
         return model, output_path
 
-    raise RuntimeError("ONNX conversion is not available in this coremltools build. Use --dummy.")
+    except Exception as e:
+        print(f"  ✗ ONNX conversion failed: {e}")
+        raise
 
 
 def convert_dummy(kind: str, compute_units: str) -> ct.models.MLModel:
@@ -140,12 +234,30 @@ def convert_dummy(kind: str, compute_units: str) -> ct.models.MLModel:
 
 
 def convert_simple_talker(model_name: str, compute_units: str, attn_impl: str | None) -> ct.models.MLModel:
-    masking_utils._is_torch_greater_or_equal_than_2_5 = True
-    model = Qwen3TTSModel.from_pretrained(
-        model_name,
-        torch_dtype=torch.float32,
-        device_map="cpu"
-    )
+    """Convert simplified talker model with error handling."""
+    try:
+        # Apply masking workaround
+        if HAS_MASKING_UTILS:
+            masking_utils._is_torch_greater_or_equal_than_2_5 = True
+
+        print(f"  Loading model: {model_name}")
+        if HAS_QWEN_TTS:
+            model = Qwen3TTSModel.from_pretrained(
+                model_name,
+                torch_dtype=torch.float32,
+                device_map="cpu"
+            )
+        else:
+            model = AutoModel.from_pretrained(
+                model_name,
+                torch_dtype=torch.float32,
+                device_map="cpu",
+                trust_remote_code=True
+            )
+        print("  ✓ Model loaded")
+    except Exception as e:
+        print(f"  ✗ Failed to load model: {e}")
+        raise
     core_model = resolve_core_model(model)
     talker = resolve_transformer(core_model)
     if attn_impl:
@@ -184,33 +296,63 @@ def convert_simple_talker(model_name: str, compute_units: str, attn_impl: str | 
 
     example_input_ids = torch.randint(0, text_vocab_size, (1, 64), dtype=torch.int32)
 
-    traced = torch.jit.trace(wrapper, example_input_ids)
+    try:
+        print("  Tracing model with torch.jit...")
+        traced = torch.jit.trace(wrapper, example_input_ids)
+        print("  ✓ Tracing successful")
+    except Exception as e:
+        print(f"  ✗ Tracing failed: {e}")
+        raise
 
-    mlmodel = ct.convert(
-        traced,
-        inputs=[
-            ct.TensorType(name="input_ids", shape=(1, ct.RangeDim(1, 256)), dtype=np.int32),
-        ],
-        outputs=[ct.TensorType(name="audio_codes")],
-        minimum_deployment_target=ct.target.iOS17,
-        convert_to="mlprogram",
-        source="pytorch",
-        compute_precision=ct.precision.FLOAT16,
-        compute_units=getattr(ct.ComputeUnit, compute_units),
-    )
+    try:
+        print("  Converting to CoreML...")
+        mlmodel = ct.convert(
+            traced,
+            inputs=[
+                ct.TensorType(name="input_ids", shape=(1, ct.RangeDim(1, 256)), dtype=np.int32),
+            ],
+            outputs=[ct.TensorType(name="audio_codes")],
+            minimum_deployment_target=ct.target.iOS17,
+            convert_to="mlprogram",
+            source="pytorch",
+            compute_precision=ct.precision.FLOAT16,
+            compute_units=getattr(ct.ComputeUnit, compute_units),
+        )
+        print("  ✓ CoreML conversion successful")
+    except Exception as e:
+        print(f"  ✗ CoreML conversion failed: {e}")
+        print("  Try using --attn-impl eager to force eager attention")
+        raise
+
     mlmodel.short_description = "VoiceClone simplified talker (text -> audio codes)"
     mlmodel.user_defined_metadata["voiceclone_simple"] = "true"
     return mlmodel
 
 
 def convert_speech_decoder(model_name: str, compute_units: str) -> ct.models.MLModel:
-    model = Qwen3TTSModel.from_pretrained(
-        model_name,
-        torch_dtype=torch.float16,
-        device_map="cpu"
-    )
-    core_model = resolve_core_model(model)
-    decoder = resolve_speech_decoder(core_model)
+    """Convert speech decoder model with error handling."""
+    try:
+        print(f"  Loading model: {model_name}")
+        if HAS_QWEN_TTS:
+            model = Qwen3TTSModel.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16,
+                device_map="cpu"
+            )
+        else:
+            model = AutoModel.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16,
+                device_map="cpu",
+                trust_remote_code=True
+            )
+        print("  ✓ Model loaded")
+
+        core_model = resolve_core_model(model)
+        decoder = resolve_speech_decoder(core_model)
+    except Exception as e:
+        print(f"  ✗ Failed to load model or decoder: {e}")
+        raise
 
     num_quantizers = 16
     if hasattr(decoder, "config") and hasattr(decoder.config, "num_quantizers"):
@@ -228,20 +370,34 @@ def convert_speech_decoder(model_name: str, compute_units: str) -> ct.models.MLM
     wrapper.eval()
 
     example_codes = torch.zeros((1, num_quantizers, 12), dtype=torch.int32)
-    traced = torch.jit.trace(wrapper, example_codes)
 
-    mlmodel = ct.convert(
-        traced,
-        inputs=[
-            ct.TensorType(name="audio_codes", shape=(1, num_quantizers, ct.RangeDim(1, 256)), dtype=np.int32),
-        ],
-        outputs=[ct.TensorType(name="waveform")],
-        minimum_deployment_target=ct.target.iOS17,
-        convert_to="mlprogram",
-        source="pytorch",
-        compute_precision=ct.precision.FLOAT16,
-        compute_units=getattr(ct.ComputeUnit, compute_units),
-    )
+    try:
+        print("  Tracing decoder with torch.jit...")
+        traced = torch.jit.trace(wrapper, example_codes)
+        print("  ✓ Tracing successful")
+    except Exception as e:
+        print(f"  ✗ Tracing failed: {e}")
+        raise
+
+    try:
+        print("  Converting to CoreML...")
+        mlmodel = ct.convert(
+            traced,
+            inputs=[
+                ct.TensorType(name="audio_codes", shape=(1, num_quantizers, ct.RangeDim(1, 256)), dtype=np.int32),
+            ],
+            outputs=[ct.TensorType(name="waveform")],
+            minimum_deployment_target=ct.target.iOS17,
+            convert_to="mlprogram",
+            source="pytorch",
+            compute_precision=ct.precision.FLOAT16,
+            compute_units=getattr(ct.ComputeUnit, compute_units),
+        )
+        print("  ✓ CoreML conversion successful")
+    except Exception as e:
+        print(f"  ✗ CoreML conversion failed: {e}")
+        raise
+
     mlmodel.short_description = "VoiceClone speech decoder"
     return mlmodel
 
@@ -315,24 +471,39 @@ def resolve_speech_decoder(core_model):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--onnx", type=Path)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--compute-units", default="ALL", choices=["ALL", "CPU_AND_NE", "CPU_ONLY"])
-    parser.add_argument("--dummy", choices=["talker", "decoder"])
+    parser = argparse.ArgumentParser(
+        description="Convert models to CoreML format with error handling and validation"
+    )
+    parser.add_argument("--onnx", type=Path, help="Path to ONNX model file")
+    parser.add_argument("--output", type=Path, required=True, help="Output path for .mlpackage")
+    parser.add_argument("--compute-units", default="ALL", choices=["ALL", "CPU_AND_NE", "CPU_ONLY"],
+                        help="CoreML compute units to use")
+    parser.add_argument("--dummy", choices=["talker", "decoder"],
+                        help="Generate dummy model instead of converting")
     parser.add_argument("--model", help="HuggingFace model id for --simple/--decoder")
-    parser.add_argument("--simple", action="store_true", help="Convert simplified talker directly from PyTorch.")
-    parser.add_argument("--decoder", action="store_true", help="Convert speech decoder directly from PyTorch.")
-    parser.add_argument("--attn-impl", help="Override attention implementation (e.g. eager) for simplified talker.")
+    parser.add_argument("--simple", action="store_true",
+                        help="Convert simplified talker directly from PyTorch")
+    parser.add_argument("--decoder", action="store_true",
+                        help="Convert speech decoder directly from PyTorch")
+    parser.add_argument("--attn-impl", help="Override attention implementation (e.g. eager)")
+    parser.add_argument("--no-validate", action="store_true",
+                        help="Skip model validation after conversion")
     args = parser.parse_args()
 
-    convert_to_coreml(
-        args.onnx,
-        args.output,
-        args.compute_units,
-        args.dummy,
-        model_name=args.model,
-        simple=args.simple,
-        decoder=args.decoder,
-        attn_impl=args.attn_impl,
-    )
+    try:
+        convert_to_coreml(
+            args.onnx,
+            args.output,
+            args.compute_units,
+            args.dummy,
+            model_name=args.model,
+            simple=args.simple,
+            decoder=args.decoder,
+            attn_impl=args.attn_impl,
+            validate=not args.no_validate,
+        )
+        print("\n✓ Conversion completed successfully!")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n✗ Conversion failed: {e}")
+        sys.exit(1)

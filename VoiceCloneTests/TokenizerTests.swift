@@ -64,4 +64,69 @@ final class TokenizerTests: XCTestCase {
 
         XCTAssertTrue(decoded.contains("Hello"))
     }
+
+    func testEncodingWithLanguage() {
+        let tokens = tokenizer.encode(text: "Hello", language: .english)
+
+        // Should contain BOS, language tag, text tokens, EOS
+        XCTAssertGreaterThanOrEqual(tokens.count, 3)
+        XCTAssertEqual(tokens[0], 0) // BOS
+        XCTAssertEqual(tokens[1], 3) // <|lang:en|>
+    }
+
+    func testEncodingWithInstruction() {
+        let tokensWithoutInstruction = tokenizer.encode(
+            text: "Hello",
+            language: .english,
+            instruction: nil
+        )
+
+        let tokensWithInstruction = tokenizer.encode(
+            text: "Hello",
+            language: .english,
+            instruction: "Speak warmly"
+        )
+
+        XCTAssertGreaterThan(
+            tokensWithInstruction.count,
+            tokensWithoutInstruction.count,
+            "Tokens with instruction should have more tokens"
+        )
+    }
+
+    func testEmptyText() {
+        let tokens = tokenizer.encode(text: "", language: .english)
+
+        // Should still have BOS and EOS
+        XCTAssertGreaterThanOrEqual(tokens.count, 2)
+        XCTAssertEqual(tokens.first, 0) // BOS
+        XCTAssertEqual(tokens.last, 1) // EOS
+    }
+
+    func testMultipleLanguages() {
+        let languages: [Language] = [.english, .chinese, .spanish, .french, .german, .japanese, .korean]
+
+        for language in languages {
+            let tokens = tokenizer.encode(text: "Test", language: language)
+            XCTAssertFalse(tokens.isEmpty, "Should tokenize for \(language)")
+            XCTAssertGreaterThanOrEqual(tokens.count, 2)
+        }
+    }
+
+    func testUnknownTokenHandling() {
+        // Text with characters not in vocab should use UNK token
+        let tokens = tokenizer.encode(text: "XYZ123", language: .english)
+
+        XCTAssertFalse(tokens.isEmpty)
+        // Should contain some unknown tokens (id: 2)
+        XCTAssertTrue(tokens.contains(2), "Should contain UNK token for unknown characters")
+    }
+
+    func testLongText() {
+        let longText = String(repeating: "Hello ", count: 100)
+        let tokens = tokenizer.encode(text: longText, language: .english)
+
+        XCTAssertFalse(tokens.isEmpty)
+        XCTAssertGreaterThan(tokens.count, 10)
+    }
 }
