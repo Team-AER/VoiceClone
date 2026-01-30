@@ -1,0 +1,6 @@
+{
+  "vocab_size": 151676,
+  "model_max_length": 131072,
+  "padding_side": "right",
+  "truncation_side": "right"
+}
