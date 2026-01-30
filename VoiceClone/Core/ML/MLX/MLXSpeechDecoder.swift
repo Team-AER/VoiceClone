@@ -169,8 +169,11 @@ public actor MLXSpeechDecoder {
         let configURL = modelPath.appendingPathComponent("decoder_config.json")
         self.config = try SpeechDecoderConfig.loadFromConfig(at: configURL)
 
-        // Load weights
-        let weightsURL = modelPath.appendingPathComponent("decoder_weights.npz")
+        // Load weights - use .safetensors format (MLX Swift API supports this)
+        let weightsURL = modelPath.appendingPathComponent("decoder_weights.safetensors")
+        print("📍 Loading decoder weights from: \(weightsURL.path)")
+
+        // MLX Swift API can load .safetensors directly
         self.weights = try MLX.loadArrays(url: weightsURL)
         
         // Initialize RVQ

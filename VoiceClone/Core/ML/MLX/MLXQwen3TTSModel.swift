@@ -49,12 +49,16 @@ public actor MLXQwen3TTSModel {
     nonisolated public init(modelPath: URL) async throws {
         // Load config manually to avoid actor isolation issues
         let configURL = modelPath.appendingPathComponent("talker_config.json")
+        print("📍 Loading talker config from: \(configURL.path)")
         let configData = try Data(contentsOf: configURL)
         let json = try JSONSerialization.jsonObject(with: configData) as? [String: Any] ?? [:]
         let loadedConfig = MLXQwen3TTSConfig(json: json)
 
-        // Load weights
-        let weightsURL = modelPath.appendingPathComponent("talker_weights.npz")
+        // Load weights - use .safetensors format (MLX Swift API supports this)
+        let weightsURL = modelPath.appendingPathComponent("talker_weights.safetensors")
+        print("📍 Loading talker weights from: \(weightsURL.path)")
+
+        // MLX Swift API can load .safetensors directly
         let loadedWeights = try MLX.loadArrays(url: weightsURL)
 
         self.config = loadedConfig

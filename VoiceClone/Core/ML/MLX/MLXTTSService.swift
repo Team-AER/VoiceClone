@@ -281,7 +281,7 @@ final class MLXTTSService: ObservableObject {
                 .appendingPathComponent("Qwen3TTS_Decoder", isDirectory: true)
 
             let configURL = docPath.appendingPathComponent("decoder_config.json")
-            let weightsURL = docPath.appendingPathComponent("decoder_weights.npz")
+            let weightsURL = docPath.appendingPathComponent("decoder_weights.safetensors")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using decoder from Documents: \(docPath.path)")
@@ -293,18 +293,28 @@ final class MLXTTSService: ObservableObject {
         guard let resourcesRoot = Bundle.main.resourceURL else {
             return nil
         }
-        
+
+        // First check bundle root (files may be flattened during copy)
+        // Use Bundle.main.url(forResource:) for better iOS bundle handling
+        if let configURL = Bundle.main.url(forResource: "decoder_config", withExtension: "json"),
+           let weightsURL = Bundle.main.url(forResource: "decoder_weights", withExtension: "safetensors") {
+            // Return the directory containing these files (bundle root)
+            let bundleRoot = configURL.deletingLastPathComponent()
+            print("✓ Using decoder from Bundle root: \(bundleRoot.path)")
+            return bundleRoot
+        }
+
         let candidateSubpaths = [
             "Resources/MLXModels/Qwen3TTS_Decoder",
             "MLXModels/Qwen3TTS_Decoder",
             "Resources/Qwen3TTS_Decoder",
             "Qwen3TTS_Decoder"
         ]
-        
+
         for subpath in candidateSubpaths {
             let candidateDir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
             let configURL = candidateDir.appendingPathComponent("decoder_config.json")
-            let weightsURL = candidateDir.appendingPathComponent("decoder_weights.npz")
+            let weightsURL = candidateDir.appendingPathComponent("decoder_weights.safetensors")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using decoder from Bundle: \(candidateDir.path)")
@@ -316,7 +326,7 @@ final class MLXTTSService: ObservableObject {
         let modelsDirPath = "/Users/prakhar/Developer/AER/VoiceClone/models/MLXModels/Qwen3TTS_Decoder"
         let modelsURL = URL(fileURLWithPath: modelsDirPath)
         let configURL = modelsURL.appendingPathComponent("decoder_config.json")
-        let weightsURL = modelsURL.appendingPathComponent("decoder_weights.npz")
+        let weightsURL = modelsURL.appendingPathComponent("decoder_weights.safetensors")
         if FileManager.default.fileExists(atPath: configURL.path) &&
             FileManager.default.fileExists(atPath: weightsURL.path) {
             print("✓ Using decoder from models directory: \(modelsDirPath)")
@@ -345,7 +355,7 @@ final class MLXTTSService: ObservableObject {
                 .appendingPathComponent(modelName, isDirectory: true)
 
             let configURL = docPath.appendingPathComponent("talker_config.json")
-            let weightsURL = docPath.appendingPathComponent("talker_weights.npz")
+            let weightsURL = docPath.appendingPathComponent("talker_weights.safetensors")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using MLX model from Documents: \(docPath.path)")
@@ -353,9 +363,19 @@ final class MLXTTSService: ObservableObject {
             }
         }
 
-        // 2) Search common bundle locations. We validate that both config.json and weights.npz exist in the candidate directory to avoid partial matches
+        // 2) Search common bundle locations. We validate that both config.json and weights.safetensors exist in the candidate directory to avoid partial matches
         guard let resourcesRoot = Bundle.main.resourceURL else {
             return nil
+        }
+
+        // First check bundle root (files may be flattened during copy)
+        // Use Bundle.main.url(forResource:) for better iOS bundle handling
+        if let configURL = Bundle.main.url(forResource: "talker_config", withExtension: "json"),
+           let weightsURL = Bundle.main.url(forResource: "talker_weights", withExtension: "safetensors") {
+            // Return the directory containing these files (bundle root)
+            let bundleRoot = configURL.deletingLastPathComponent()
+            print("✓ Using MLX model from Bundle root: \(bundleRoot.path)")
+            return bundleRoot
         }
 
         let candidateSubpaths = [
@@ -368,7 +388,7 @@ final class MLXTTSService: ObservableObject {
         for subpath in candidateSubpaths {
             let candidateDir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
             let configURL = candidateDir.appendingPathComponent("talker_config.json")
-            let weightsURL = candidateDir.appendingPathComponent("talker_weights.npz")
+            let weightsURL = candidateDir.appendingPathComponent("talker_weights.safetensors")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using MLX model from Bundle: \(candidateDir.path)")
@@ -385,7 +405,7 @@ final class MLXTTSService: ObservableObject {
         for devPath in devPaths {
             let devURL = URL(fileURLWithPath: devPath)
             let configURL = devURL.appendingPathComponent("talker_config.json")
-            let weightsURL = devURL.appendingPathComponent("talker_weights.npz")
+            let weightsURL = devURL.appendingPathComponent("talker_weights.safetensors")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using MLX model from dev path: \(devPath)")

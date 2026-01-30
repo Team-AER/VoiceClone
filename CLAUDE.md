@@ -84,13 +84,15 @@ Models are loaded from filesystem paths with a fallback strategy:
 1. Documents directory (for production downloaded models)
 2. App bundle (for development on physical devices)
 3. Development paths (for running from Xcode):
-   - `VoiceClone/Resources/MLXModels/Qwen3TTS_INT4/`
-   - `models/MLXModels/Qwen3TTS_INT4/` (talker model)
-   - `models/MLXModels/Qwen3TTS_Decoder/` (decoder model)
+ - `VoiceClone/Resources/MLXModels/Qwen3TTS_INT4/`
+ - `models/MLXModels/Qwen3TTS_INT4/` (talker model)
+ - `models/MLXModels/Qwen3TTS_Decoder/` (decoder model)
+
+**Model Format**: MLX Swift API requires `.safetensors` format. Use `scripts/convert_npz_to_safetensors.py` to convert `.npz` files to `.safetensors`.
 
 **File Naming Convention** (to prevent Xcode build conflicts):
-- Talker model files: `talker_config.json`, `talker_weights.npz`, `talker_weights.pkl`
-- Decoder model files: `decoder_config.json`, `decoder_weights.npz`
+- Talker model files: `talker_config.json`, `talker_weights.safetensors` (converted from .npz)
+- Decoder model files: `decoder_config.json`, `decoder_weights.safetensors` (converted from .npz)
 
 **Critical Development Requirement**: Because MLX requires physical devices (Metal hardware) and physical devices cannot access the Mac's filesystem, models MUST be present in `VoiceClone/Resources/MLXModels/` for development testing. The original filenames were causing "Multiple commands produce" errors in Xcode, so they have been renamed to unique names as listed above.
 
@@ -164,8 +166,9 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 ### Model File Management
 - **Development**: Models MUST be in `VoiceClone/Resources/MLXModels/` for testing on physical devices (required for MLX/Metal). Physical devices cannot access the Mac's filesystem.
 - **Production**: Models are downloaded via ODR (On-Demand Resources) to Documents directory, NOT bundled in the IPA.
-- **Git**: `.gitignore` excludes `.npz` and `.pkl` files to prevent large files from being committed.
+- **Git**: `.gitignore` excludes `.safetensors`, `.npz`, and `.pkl` files to prevent large files from being committed.
 - **File naming**: Models use unique prefixes (`talker_*`, `decoder_*`) to prevent Xcode build conflicts when multiple models are bundled.
+- **Format**: MLX Swift API requires `.safetensors` format (supports dictionary of arrays via `loadArrays()`). `.npz` format is NOT supported.
 
 ### Core Data
 - Schema defined in `VoiceEntity.swift`
@@ -206,6 +209,7 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 2. **Large Model Files**: 2.6GB total, must be downloaded separately (not in git repo)
 3. **Voice Cloning**: Currently falls back to voice design mode (reference audio embedding extraction not implemented)
 4. **Memory Usage**: ~1.5GB during inference on device
+5. **Model Format**: MLX Swift only supports `.safetensors` and `.npy` (single array). `.npz` is NOT supported. Use `scripts/convert_npz_to_safetensors.py` to convert models.
 
 ## Dependencies
 
