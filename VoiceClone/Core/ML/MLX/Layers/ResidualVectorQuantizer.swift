@@ -58,10 +58,14 @@ struct ResidualVectorQuantizer: @unchecked Sendable {
             
             // Look up in codebook: [batch * seq_len, codebook_dim]
             let codebook = codebooks[q]
-            let embeddingsFlat = MLX.take(codebook, codesFlat, axis: 0)
+            // Ensure indices are int32 for take operation
+            let indices = codesFlat.asType(.int32)
+            let embeddingsFlat = MLX.take(codebook, indices, axis: 0)
+            // Ensure embeddings are float32
+            let embeddingsFlatFloat = embeddingsFlat.asType(.float32)
             
             // Reshape back: [batch, seq_len, codebook_dim]
-            let embeddingsQ = embeddingsFlat.reshaped(batchSize, seqLen, codebookDim)
+            let embeddingsQ = embeddingsFlatFloat.reshaped(batchSize, seqLen, codebookDim)
             
             embeddings.append(embeddingsQ)
         }
@@ -92,18 +96,29 @@ nonisolated func loadResidualVectorQuantizer(
     prefix: String = "quantizer.rvq"
 ) -> ResidualVectorQuantizer {
     var codebooks: [MLXArray] = []
+    var actualCodebookDim = codebookDim
     
     for q in 0..<numQuantizers {
         // Look for weight key like "quantizer.rvq.layers.0.codebook.weight"
         let key = "\(prefix).layers.\(q).codebook.weight"
         
         if let codebook = weights[key] {
+            // Check actual shape on first codebook
+            if q == 0 {
+                actualCodebookDim = codebook.shape[1]
+                if actualCodebookDim != codebookDim {
+                    print("⚠️ Warning: Codebook dimension mismatch!")
+                    print("   Config expects: \(codebookDim)")
+                    print("   Actual weights: \(actualCodebookDim)")
+                    print("   Codebook shape: \(codebook.shape)")
+                }
+            }
             codebooks.append(codebook)
         } else {
             // Fallback: create random codebook (should not happen with proper weights)
             print("⚠️ Warning: Codebook \(q) not found, using random initialization")
             // Create placeholder codebook (zeros) since we don't have random in MLX 0.30.3
-            let randomCodebook = MLX.zeros([codebookSize, codebookDim])
+            let randomCodebook = MLX.zeros([codebookSize, actualCodebookDim])
             codebooks.append(randomCodebook)
         }
     }
@@ -111,7 +126,7 @@ nonisolated func loadResidualVectorQuantizer(
     return ResidualVectorQuantizer(
         numQuantizers: numQuantizers,
         codebookSize: codebookSize,
-        codebookDim: codebookDim,
+        codebookDim: actualCodebookDim,  // Use actual dimension from weights
         codebooks: codebooks
     )
 }

@@ -120,7 +120,11 @@ public actor MLXQwen3TTSModel {
 
     private func embedTokens(_ inputIds: MLXArray) -> MLXArray {
         let embedWeight = weights["embed_tokens.weight"]!
-        return MLX.take(embedWeight, inputIds, axis: 0)
+        // Ensure indices are int32 for take operation
+        let indices = inputIds.asType(.int32)
+        // Take operation returns the dtype of embedWeight, but ensure it's float32
+        let embedded = MLX.take(embedWeight, indices, axis: 0)
+        return embedded.asType(.float32)
     }
 
     private func textProjection(_ hidden: MLXArray) -> MLXArray {
@@ -236,8 +240,9 @@ public actor MLXQwen3TTSModel {
 
     // MARK: - Helper Functions
 
-    private func linear(_ input: MLXArray, weight: MLXArray, bias: MLXArray? = nil) -> MLXArray {
-        var output = MLX.matmul(input, weight.T)
+    private func linear(_ input: MLXArray, weight: MLXArray, bias: MLXArray? = nil, useTranspose: Bool = true) -> MLXArray {
+        let weightToUse = useTranspose ? weight.T : weight
+        var output = MLX.matmul(input, weightToUse)
         if let bias = bias {
             output = output + bias
         }

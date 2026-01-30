@@ -90,20 +90,29 @@ struct SpeechDecoderConfig: @unchecked Sendable {
         }
         
         // Parse decoder config manually to avoid Codable MainActor issues
-        return SpeechDecoderConfig(
+        // Use actual config values from Qwen3-TTS decoder config
+        let config = SpeechDecoderConfig(
             numQuantizers: decoderConfigDict["num_quantizers"] as? Int ?? 16,
             codebookSize: decoderConfigDict["codebook_size"] as? Int ?? 2048,
-            codebookDim: decoderConfigDict["codebook_dim"] as? Int ?? 256,
-            hiddenSize: decoderConfigDict["hidden_size"] as? Int ?? 1024,
-            latentDim: decoderConfigDict["latent_dim"] as? Int ?? 256,
-            decoderDim: decoderConfigDict["decoder_dim"] as? Int ?? 512,
-            numHiddenLayers: decoderConfigDict["num_hidden_layers"] as? Int ?? 4,
-            numAttentionHeads: decoderConfigDict["num_attention_heads"] as? Int ?? 8,
-            upsampleRates: decoderConfigDict["upsample_rates"] as? [Int] ?? [8, 8, 4, 2],
-            upscaleRatios: decoderConfigDict["upsampling_ratios"] as? [Int] ?? [8, 8, 4, 2],
+            codebookDim: decoderConfigDict["codebook_dim"] as? Int ?? 512,  // Updated from 256
+            hiddenSize: decoderConfigDict["hidden_size"] as? Int ?? 512,    // Updated from 1024
+            latentDim: decoderConfigDict["latent_dim"] as? Int ?? 1024,     // Updated from 256
+            decoderDim: decoderConfigDict["decoder_dim"] as? Int ?? 1536,   // Updated from 512
+            numHiddenLayers: decoderConfigDict["num_hidden_layers"] as? Int ?? 8,  // Updated from 4
+            numAttentionHeads: decoderConfigDict["num_attention_heads"] as? Int ?? 16,  // Updated from 8
+            upsampleRates: decoderConfigDict["upsample_rates"] as? [Int] ?? [8, 5, 4, 3],
+            upscaleRatios: decoderConfigDict["upsampling_ratios"] as? [Int] ?? [2, 2],
             outputSampleRate: json["output_sample_rate"] as? Int ?? 24000,
             decodeUpsampleRate: json["decode_upsample_rate"] as? Int ?? 1920
         )
+        
+        print("📐 Decoder config loaded:")
+        print("  Codebook dim: \(config.codebookDim)")
+        print("  Latent dim: \(config.latentDim)")
+        print("  Hidden size: \(config.hiddenSize)")
+        print("  Num quantizers: \(config.numQuantizers)")
+        
+        return config
     }
 }
 
@@ -163,6 +172,7 @@ public actor MLXSpeechDecoder {
     private let config: SpeechDecoderConfig
     private let weights: [String: MLXArray]
     private let rvq: ResidualVectorQuantizer
+    private let actualRvqOutputDim: Int  // Track actual RVQ output dimension
     
     public init(modelPath: URL) async throws {
         // Load config
@@ -185,9 +195,13 @@ public actor MLXSpeechDecoder {
             prefix: "quantizer.rvq"
         )
         
+        // Store actual RVQ output dimension
+        self.actualRvqOutputDim = rvq.codebookDim
+        
         print("✓ Loaded speech decoder from \(modelPath.lastPathComponent)")
         print("  Quantizers: \(config.numQuantizers)")
         print("  Codebook size: \(config.codebookSize)")
+        print("  RVQ output dim: \(actualRvqOutputDim)")
         print("  Upsample rate: \(config.decodeUpsampleRate)x")
     }
     
@@ -238,10 +252,32 @@ public actor MLXSpeechDecoder {
     private func preTransformer(_ hidden: MLXArray) -> MLXArray {
         var x = hidden
         
+        print("🔍 PreTransformer input shape: \(x.shape)")
+        
         // Input projection
         if let inputProj = weights["pre_transformer.input_proj.weight"] {
-            x = linear(x, weight: inputProj)
+            print("🔍 Input projection weight shape: \(inputProj.shape)")
+            print("   Expected: [hidden_size(\(config.hiddenSize)), rvq_output(\(actualRvqOutputDim))]")
+            
+            // Check if dimensions match
+            let expectedInputDim = inputProj.shape[1]  // For PyTorch format (out, in)
+            let actualInputDim = x.shape[x.ndim - 1]
+            
+            if expectedInputDim != actualInputDim {
+                print("⚠️ Dimension mismatch in input projection!")
+                print("   Weight expects input: \(expectedInputDim)")
+                print("   Actual input: \(actualInputDim)")
+                
+                // Try transposing the weight to fix the issue
+                let transposedWeight = inputProj.T
+                print("   Trying transposed weight shape: \(transposedWeight.shape)")
+                x = linear(x, weight: transposedWeight, useTranspose: false)
+            } else {
+                x = linear(x, weight: inputProj)
+            }
         }
+        
+        print("🔍 After input projection: \(x.shape)")
         
         // Transformer layers
         for layerIdx in 0..<config.numHiddenLayers {
@@ -386,8 +422,9 @@ public actor MLXSpeechDecoder {
     
     // MARK: - Helper Functions
     
-    private func linear(_ input: MLXArray, weight: MLXArray, bias: MLXArray? = nil) -> MLXArray {
-        var output = MLX.matmul(input, weight.T)
+    private func linear(_ input: MLXArray, weight: MLXArray, bias: MLXArray? = nil, useTranspose: Bool = true) -> MLXArray {
+        let weightToUse = useTranspose ? weight.T : weight
+        var output = MLX.matmul(input, weightToUse)
         if let bias = bias {
             output = output + bias
         }
