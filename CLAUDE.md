@@ -1,531 +1,202 @@
-# CLAUDE.md - VoiceClone Project Guide
+# CLAUDE.md
 
-This file provides context and guidelines for AI assistants (Claude) working on the VoiceClone iOS project.
-
----
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-**VoiceClone** is an open-source iOS application for on-device text-to-speech synthesis with voice cloning and voice design capabilities. It uses Qwen3-TTS models with MLX for fully offline operation.
-
-### Key Facts
-- **Platform**: iOS 17.0+ (iPhone/iPad)
-- **Language**: Swift 6.0 with strict concurrency
-- **UI Framework**: SwiftUI
-- **ML Framework**: MLX (Metal Learning eXtensions)
-- **Models**: Qwen3-TTS-12Hz-1.7B (INT4/INT8 quantized)
-- **License**: Apache 2.0
-
----
-
-## Architecture Summary
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         App Layer                           │
-│  SwiftUI Views → ViewModels → Services                      │
-├─────────────────────────────────────────────────────────────┤
-│                        Core Layer                           │
-│  MLXTTSService │ MLXQwen3TTSModel │ AudioEngine │ Storage   │
-├─────────────────────────────────────────────────────────────┤
-│                      Infrastructure                         │
-│  MLX │ AVFoundation │ CoreData │ FileManager                │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Key Components
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `MLXTTSService` | `Core/ML/MLX/MLXTTSService.swift` | Main TTS service |
-| `MLXQwen3TTSModel` | `Core/ML/MLX/MLXQwen3TTSModel.swift` | MLX model wrapper |
-| `Qwen3Tokenizer` | `Core/ML/Tokenizer/Qwen3Tokenizer.swift` | Text tokenization |
-| `AudioEngine` | `Core/Audio/AudioEngine.swift` | Playback with streaming |
-
----
-
-## Code Style Guidelines
-
-### Swift Conventions
-
-```swift
-// ✅ DO: Use actors for thread-safe state
-actor ModelCache {
-    private var models: [String: MLXQwen3TTSModel] = [:]
-}
-
-// ✅ DO: Use @MainActor for UI-bound classes
-@MainActor
-final class SynthesisViewModel: ObservableObject { }
-
-// ✅ DO: Use structured concurrency
-func synthesize() async throws -> AsyncThrowingStream<AudioChunk, Error> { }
-
-// ❌ DON'T: Use DispatchQueue for concurrency
-// ❌ DON'T: Force unwrap optionals
-// ❌ DON'T: Use implicitly unwrapped optionals except for @IBOutlet
-```
-
-### Naming Conventions
-
-```swift
-// Types: PascalCase
-struct AudioChunk { }
-enum Language { }
-class MLXTTSService { }
-
-// Properties/Methods: camelCase
-let sampleRate: Int
-func loadModel(_ type: String) async throws
-
-// Constants: camelCase (not SCREAMING_CASE)
-let maxSequenceLength = 2048
-
-// Files: Match primary type name
-// AudioEngine.swift contains `class AudioEngine`
-```
-
-### Error Handling
-
-```swift
-// ✅ DO: Define domain-specific errors
-enum TTSError: LocalizedError {
-    case modelNotLoaded
-    case inferenceError(underlying: Error)
-
-    var errorDescription: String? {
-        switch self {
-        case .modelNotLoaded:
-            return "TTS model is not loaded"
-        case .inferenceError(let error):
-            return "Inference failed: \(error.localizedDescription)"
-        }
-    }
-}
-
-// ✅ DO: Propagate errors with context
-func synthesize() async throws {
-    guard let model = talkerModel else {
-        throw TTSError.modelNotLoaded
-    }
-}
-
-// ❌ DON'T: Swallow errors silently
-// ❌ DON'T: Use try! in production code
-```
-
-### SwiftUI Patterns
-
-```swift
-// ✅ DO: Use @StateObject for owned ViewModels
-struct SynthesisView: View {
-    @StateObject private var viewModel = SynthesisViewModel()
-}
-
-// ✅ DO: Use @EnvironmentObject for shared dependencies
-struct ChildView: View {
-    @EnvironmentObject var container: DIContainer
-}
-
-// ✅ DO: Extract subviews for readability
-struct SynthesisView: View {
-    var body: some View {
-        VStack {
-            textEditor      // Computed property
-            controlButtons  // Computed property
-        }
-    }
-
-    private var textEditor: some View {
-        TextEditor(text: $viewModel.text)
-    }
-}
-
-// ❌ DON'T: Put business logic in Views
-// ❌ DON'T: Use @ObservedObject for ViewModels owned by the view
-```
-
----
-
-## Common Tasks
-
-### Adding a New Feature
-
-1. Create feature folder: `Features/NewFeature/`
-2. Add View: `Features/NewFeature/Views/NewFeatureView.swift`
-3. Add ViewModel: `Features/NewFeature/ViewModels/NewFeatureViewModel.swift`
-4. Add to tab navigation in `ContentView.swift`
-5. Write tests in `Tests/UnitTests/NewFeatureTests.swift`
-
-### Modifying the Tokenizer
-
-1. Update vocab/merges files in `Resources/Tokenizer/`
-2. Modify encoding logic in `Qwen3Tokenizer.encode()`
-3. Add tests for new tokenization behavior
-4. Verify round-trip encoding/decoding works
-
-### Optimizing Performance
-
-1. Profile with Instruments (Time Profiler, Allocations)
-2. Check GPU utilization with Metal System Trace
-3. Verify ANE usage with `sudo powermetrics --samplers gpu_power`
-4. Reduce batch sizes if thermal throttling occurs
-
----
-
-## File Locations
-
-### Core Files
-```
-Core/
-├── TTS/
-│   └── TTSTypes.swift            # TTS enums and types
-├── ML/
-│   ├── Tokenizer/
-│   │   └── Qwen3Tokenizer.swift  # BPE tokenizer
-│   └── MLX/
-│       ├── MLXTTSService.swift   # MLX service
-│       └── MLXQwen3TTSModel.swift # Model wrapper
-├── Audio/
-│   ├── AudioEngine.swift         # Playback
-│   ├── AudioRecorder.swift       # Recording
-│   └── AudioExporter.swift       # File export
-└── Storage/
-    ├── VoiceStorage.swift        # Voice persistence
-    └── CoreDataStack.swift       # Core Data
-```
-
-### Resource Files
-```
-Resources/
-├── MLXModels/
-│   ├── Qwen3TTS_INT4/            # INT4 quantized model
-│   │   ├── config.json
-│   │   └── weights.npz
-├── Tokenizer/
-│   ├── vocab.json               # Token vocabulary
-│   ├── merges.txt               # BPE merges
-│   └── special_tokens.json      # Special tokens
-└── PresetVoices/
-    └── voices.json              # Built-in voice metadata
-```
-
-Decoder model (not bundled): `models/MLXModels/Qwen3TTS_Decoder/`
-
-### Conversion Scripts
-```
-scripts/
-├── convert_mlx.py               # PyTorch → MLX
-├── quantize_int8_tensor.py      # Model quantization
-└── export_tokenizer.py          # Tokenizer export
-```
-
----
-
-## Testing Guidelines
-
-### Unit Tests
-
-```swift
-// Test file naming: {Component}Tests.swift
-// Test method naming: test{Behavior}
-
-final class TokenizerTests: XCTestCase {
-
-    func testBasicTokenization() {
-        // Arrange
-        let tokenizer = makeTokenizer()
-        let text = "Hello, world!"
-
-        // Act
-        let tokens = tokenizer.encode(text: text, language: .english)
-
-        // Assert
-        XCTAssertFalse(tokens.isEmpty)
-    }
-
-    func testRoundTrip() {
-        // Test encode → decode preserves meaning
-    }
-}
-```
-
-### Integration Tests
-
-```swift
-// Use @MainActor for tests involving UI or services
-@MainActor
-final class MLXTTSServiceTests: XCTestCase {
-
-    func testSynthesisProducesAudio() async throws {
-        // Given
-        let service = makeMLXTTSService()
-        try await service.loadCapability(.customVoice)
-
-        // When
-        var chunks: [AudioChunk] = []
-        for try await chunk in try await service.synthesize(
-            text: "Hello",
-            language: .english,
-            speaker: .ryan
-        ) {
-            chunks.append(chunk)
-        }
-
-        // Then
-        XCTAssertFalse(chunks.isEmpty)
-    }
-}
-```
-
-### Test Fixtures
-
-- Place test audio files in `Tests/Fixtures/Audio/`
-- Place test models in `Tests/Fixtures/Models/`
-- Use `Bundle(for: type(of: self))` to locate fixtures
-
----
-
-## Dependencies
-
-### Swift Package Manager
-
-```swift
-// Package.swift dependencies
-dependencies: [
-    // MLX Swift bindings
-    .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.1.0"),
-
-    // Async utilities
-    .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
-
-    // Collections
-    .package(url: "https://github.com/apple/swift-collections", from: "1.1.0"),
-]
-```
-
-### System Frameworks
-
-- **MLX**: Metal-accelerated ML inference
-- **AVFoundation**: Audio playback/recording
-- **CoreData**: Voice persistence
-- **Accelerate**: SIMD operations for audio processing
-
----
+VoiceClone is an iOS app for on-device text-to-speech synthesis with voice cloning and voice design capabilities. It uses MLX (Apple's machine learning framework) to run Qwen3-TTS models locally on iOS devices via Metal acceleration.
+
+**Platform**: iOS 17.0+
+**Language**: Swift 6.0 (strict concurrency enabled)
+**ML Framework**: MLX via mlx-swift package
+**Architecture**: MVVM with SwiftUI
 
 ## Build Commands
 
-```bash
-# Build for simulator
-xcodebuild build \
-    -project VoiceClone.xcodeproj \
-    -scheme VoiceClone \
-    -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
+### Building the Project
 
-# Run tests
+```bash
+# Build for physical device (REQUIRED - MLX needs Metal hardware)
+xcodebuild build \
+  -project VoiceClone.xcodeproj \
+  -scheme VoiceClone \
+  -destination 'generic/platform=iOS'
+
+# Or in Xcode: Cmd+B (with physical device selected)
+```
+
+**IMPORTANT**: This project does NOT work on iOS Simulator. MLX requires Metal hardware features only available on physical devices. Simulator builds will fail with Metal linker errors.
+
+### Running Tests
+
+```bash
+# Run all tests (requires physical iOS device)
 xcodebuild test \
-    -project VoiceClone.xcodeproj \
-    -scheme VoiceClone \
-    -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
+  -project VoiceClone.xcodeproj \
+  -scheme VoiceClone \
+  -destination 'platform=iOS,name=Your Device Name'
 
-# Build for device
-xcodebuild build \
-    -project VoiceClone.xcodeproj \
-    -scheme VoiceClone \
-    -destination 'generic/platform=iOS' \
-    -configuration Release
-
-# Archive for distribution
-xcodebuild archive \
-    -project VoiceClone.xcodeproj \
-    -scheme VoiceClone \
-    -archivePath ./build/VoiceClone.xcarchive
+# Run specific test suite
+xcodebuild test \
+  -project VoiceClone.xcodeproj \
+  -scheme VoiceClone \
+  -only-testing:VoiceCloneTests/MLXTTSServiceTests \
+  -destination 'platform=iOS,name=Your Device Name'
 ```
 
----
-
-## Model Conversion Commands
+### Model Verification
 
 ```bash
-# Set up Python environment
-cd scripts
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Convert to MLX format
-python convert_mlx.py \
-    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --output ./mlx_models/Qwen3TTS_INT4 \
-    --quantize
-
-# Export tokenizer
-python export_tokenizer.py \
-    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --output ./tokenizer_output
+# Verify model files are NOT bundled in app (should be empty output)
+./verify_bundle_size.sh
 ```
 
----
+## Architecture
 
-## MLX Model Export
+### Core Components
 
-### Current Implementation
+1. **MLX Integration** (`VoiceClone/Core/ML/MLX/`)
+   - `MLXTTSService.swift`: Main TTS service actor (MainActor isolated)
+   - `MLXQwen3TTSModel.swift`: MLX-based transformer implementation (actor isolated)
+   - `MLXSpeechDecoder.swift`: Audio decoder (Snake activation + ResidualVectorQuantizer)
+   - `ConvLayers.swift`, `SnakeActivation.swift`, `ResidualVectorQuantizer.swift`: Neural network layers
 
-The app uses INT4 quantized MLX models for efficient on-device inference:
+2. **Audio Pipeline** (`VoiceClone/Core/Audio/`)
+   - `AudioEngine.swift`: AVAudioEngine wrapper for playback
+   - `AudioRecorder.swift`: Recording for voice cloning
+   - `AudioExporter.swift`: Export to WAV/M4A
 
-```bash
-# Convert and quantize in one step
-python convert_mlx.py \
-    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --output ./mlx_models/Qwen3TTS_INT4 \
-    --quantize
-```
+3. **Storage** (`VoiceClone/Core/Storage/`)
+   - `CoreDataStack.swift`: Core Data setup
+   - `VoiceStorage.swift`: Voice library persistence
+   - `VoiceEntity.swift`: Core Data entity
 
-This produces:
-- `config.json` - Model configuration
-- `weights.npz` - INT4 quantized weights (~1GB)
+4. **Features** (`VoiceClone/Features/`)
+   - `Synthesis/`: Text-to-speech synthesis UI
+   - `VoiceDesign/`: Create voices from text descriptions
+   - `VoiceClone/`: Clone voices from audio samples
+   - `VoiceLibrary/`: Manage saved voices
 
-### Audio Output
+### Model Loading Architecture
 
-Currently uses placeholder multi-tone audio. Real speech requires implementing the Qwen3-TTS speech decoder (114M parameters with Snake activation, RVQ, and upsampling layers).
+Models are loaded from filesystem paths with a fallback strategy:
 
-See `DECODER_STATUS.md` for decoder implementation details.
+1. Documents directory (for production downloaded models)
+2. App bundle (currently NOT used - models too large)
+3. Development paths (for running from Xcode):
+   - `VoiceClone/Resources/MLXModels/Qwen3TTS_INT4/`
+   - `models/MLXModels/Qwen3TTS_INT4/` (talker model)
+   - `models/MLXModels/Qwen3TTS_Decoder/` (decoder model)
 
----
+**Critical**: The talker model (`weights.npz` 1.0GB, `weights.pkl` 1.2GB) and decoder model (`weights.npz` 436MB) are NOT bundled in the app to avoid bloating the IPA. They are kept outside the Xcode project in `models/MLXModels/` and loaded via development path fallback during local development.
 
-## Debugging Tips
+## Swift 6 Concurrency Patterns
 
-### MLX Issues
+This codebase uses Swift 6 strict concurrency. Key patterns:
 
+### Actor Isolation
+- `MLXTTSService`: `@MainActor` for UI updates
+- `MLXQwen3TTSModel`, `MLXSpeechDecoder`: Actors for thread-safe model inference
+- Use `nonisolated` for initializers that don't access mutable state
+
+### Sendability
+- Use `@unchecked Sendable` for data-holding structs that are immutable
+- Use `nonisolated(unsafe)` for stored properties needing cross-isolation access (use sparingly)
+- Use `@preconcurrency import MLX` to suppress Sendable warnings for `MLXArray`
+
+### Example Pattern
 ```swift
-// Check Metal device
-import Metal
-let device = MTLCreateSystemDefaultDevice()
-print("Metal device: \(device?.name ?? "none")")
+// Config structs: @unchecked Sendable + nonisolated init
+struct MyConfig: @unchecked Sendable {
+    let value: Int
+    nonisolated init(json: [String: Any]) { ... }
+}
 
-// Monitor GPU usage
-// Run in Terminal:
-// sudo powermetrics --samplers gpu_power
-```
+// Actors with nonisolated init
+actor MyModel {
+    nonisolated init(modelPath: URL) async throws { ... }
+}
 
-### Memory Issues
-
-```swift
-// Track memory usage
-func logMemory() {
-    var info = mach_task_basic_info()
-    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
-    withUnsafeMutablePointer(to: &info) {
-        $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-            task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
-        }
-    }
-    print("Memory: \(info.resident_size / 1_000_000) MB")
+// MainActor services
+@MainActor
+final class MyService: ObservableObject {
+    @Published var state: State = .idle
 }
 ```
 
-### Audio Issues
+## MLX API Compatibility
 
-```swift
-// Verify audio session
-let session = AVAudioSession.sharedInstance()
-print("Category: \(session.category)")
-print("Mode: \(session.mode)")
-print("Sample Rate: \(session.sampleRate)")
-```
+Using mlx-swift v0.30.3. Key API differences from older versions:
 
----
+- `Conv1d`: Use `inputChannels`/`outputChannels` (not `inChannels`/`outChannels`)
+- No `MLXRandom` module available - use `MLX.zeros()` for placeholder tensors
+- `MLX.repeated()` signature changed - check current API docs
 
-## Performance Targets
+## File Organization Rules
 
-| Metric | Target | Maximum |
-|--------|--------|---------|
-| First token latency | <500ms | 1000ms |
-| Streaming latency | <150ms | 300ms |
-| Memory peak | <2GB | 3GB |
-| Model load time | <5s | 10s |
-| Battery per 10min | <5% | 8% |
+### DO NOT Bundle Large Files
+- Model weights (`.npz`, `.pkl`, `.safetensors`, `.bin`) should NEVER be in `VoiceClone/Resources/` or added to "Copy Bundle Resources" build phase
+- Keep models in `models/MLXModels/` directory (outside Xcode project)
+- `.gitignore` excludes these files
 
----
+### Core Data
+- Schema defined in `VoiceEntity.swift`
+- Access via `VoiceStorage` actor wrapper, NOT directly
 
-## Security Considerations
+## Common Development Tasks
 
-1. **No network required**: All inference is local
-2. **No data collection**: Voice data never leaves device
-3. **Secure storage**: Use Keychain for sensitive preferences
-4. **Input validation**: Sanitize all user text input
-5. **Model integrity**: Verify checksums on model downloads
+### Adding a New MLX Layer
+1. Create in `VoiceClone/Core/ML/MLX/Layers/`
+2. Use `nonisolated` functions for stateless operations
+3. Use `nonisolated(unsafe)` for stored properties if needed (e.g., `Conv1d` modules)
+4. Ensure all MLXArray operations are thread-safe
 
----
+### Modifying Audio Pipeline
+1. Edit `AudioEngine.swift` for playback changes
+2. Use `AVAudioPCMBuffer` with 24kHz mono Float32 format
+3. Always configure audio session: `.playback` category, `.spokenAudio` mode
+
+### Adding New Voice Presets
+1. Update `PresetVoice` enum in `VoiceClone/Core/Models/PresetVoice.swift`
+2. Add voice metadata to tokenizer prompt templates if needed
+
+## Testing Strategy
+
+### Unit Tests
+- Test MLX layers (Snake, RVQ, Conv) independently
+- Mock `MLXArray` operations where possible
+- Requires physical device (no simulator support)
+
+### Integration Tests
+- Test full synthesis pipeline with small test inputs
+- Verify model loading from all fallback paths
+- Check audio output format (24kHz, Float32, mono)
 
 ## Known Limitations
 
-1. **Model size**: 1.7B models require ~1-2GB storage
-2. **Memory**: Peak usage can hit 2GB during inference
-3. **Thermal**: Extended use may cause throttling on older devices
-4. **Languages**: Limited to 10 supported languages
-5. **Audio quality**: Currently placeholder audio (decoder not implemented)
+1. **No Simulator Support**: MLX requires Metal, which isn't fully supported on simulator
+2. **Large Model Files**: 2.6GB total, must be downloaded separately (not in git repo)
+3. **Voice Cloning**: Currently falls back to voice design mode (reference audio embedding extraction not implemented)
+4. **Memory Usage**: ~1.5GB during inference on device
 
----
+## Dependencies
 
-## Related Documentation
+- **mlx-swift** v0.30.3: Apple MLX framework bindings
+- **SwiftUI**: UI framework
+- **Core Data**: Voice library persistence
+- **AVFoundation**: Audio playback and recording
 
-- [PRD.md](./PRD.md) - Product requirements and architecture
-- [MLX_INTEGRATION_GUIDE.md](./MLX_INTEGRATION_GUIDE.md) - MLX backend details
-- [DECODER_STATUS.md](./DECODER_STATUS.md) - Speech decoder implementation status
-- [Qwen3-TTS GitHub](https://github.com/QwenLM/Qwen3-TTS) - Original model repository
-- [MLX Documentation](https://ml-explore.github.io/mlx/build/html/index.html) - MLX framework docs
+## Production Deployment
 
----
+For production, implement on-demand model download:
+1. Host models on server (e.g., HuggingFace, S3)
+2. Download to Documents directory on first launch
+3. Show progress UI during download
+4. Verify checksums after download
+5. Update `getModelPath()` to prioritize Documents directory
 
-## Quick Reference
+## Documentation References
 
-### Adding a new preset voice
-
-```swift
-// 1. Add to PresetVoice enum
-enum PresetVoice: String, CaseIterable {
-    case vivian, ryan, newVoice  // Add here
-}
-
-// 2. Update voices.json
-{
-    "newVoice": {
-        "name": "New Voice",
-        "language": "English",
-        "style": "Friendly"
-    }
-}
-```
-
-### Adding a new language
-
-```swift
-// 1. Add to Language enum
-enum Language: String, CaseIterable {
-    case newLanguage = "NewLanguage"
-
-    var code: String {
-        switch self {
-        case .newLanguage: return "xx"
-        }
-    }
-}
-
-// 2. Ensure model supports the language
-// 3. Add to language picker UI
-```
-
-### Changing model quantization
-
-```python
-# In convert_mlx.py, modify quantization bits
-from mlx.nn.layers import Embedding, Linear
-
-# Use INT8 instead of INT4
-nn.quantize(
-    model,
-    group_size=64,
-    bits=8  # Change from 4 to 8 for higher quality
-)
-```
+- `BUILD_AND_RUN.md`: Detailed build instructions
+- `REMAINING_WORK.md`: Current status and next steps
+- `PRD.md`: Product requirements and technical architecture
