@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1CDCCBC82F2CB3700033820A /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 1CDCCBC72F2CB3700033820A /* MLX */; };
+		1CDCCBCA2F2CB3700033820A /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 1CDCCBC92F2CB3700033820A /* MLXNN */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		1C8FC9712F295CD4009D6580 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +57,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1CDCCBCA2F2CB3700033820A /* MLXNN in Frameworks */,
+				1CDCCBC82F2CB3700033820A /* MLX in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +119,8 @@
 			);
 			name = VoiceClone;
 			packageProductDependencies = (
+				1CDCCBC72F2CB3700033820A /* MLX */,
+				1CDCCBC92F2CB3700033820A /* MLXNN */,
 			);
 			productName = VoiceClone;
 			productReference = 1C8FC9612F295CD2009D6580 /* VoiceClone.app */;
@@ -195,6 +204,9 @@
 			);
 			mainGroup = 1C8FC9582F295CD2009D6580;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1C8FC9622F295CD2009D6580 /* Products */;
 			projectDirPath = "";
@@ -592,6 +604,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.30.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1CDCCBC72F2CB3700033820A /* MLX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */;
+			productName = MLX;
+		};
+		1CDCCBC92F2CB3700033820A /* MLXNN */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */;
+			productName = MLXNN;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1C8FC9592F295CD2009D6580 /* Project object */;
 }

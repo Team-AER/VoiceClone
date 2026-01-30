@@ -46,25 +46,35 @@ def export_tokenizer(model_name: str, output_dir: Path):
     elif hasattr(tokenizer, "mergeable_ranks"):
         # Qwen-style tokenizer
         try:
-            merges = list(tokenizer.mergeable_ranks.keys())
+            mergeable_ranks = tokenizer.mergeable_ranks
+            sorted_merges = sorted(mergeable_ranks.items(), key=lambda x: x[1])
+
             with open(merges_path, "w", encoding="utf-8") as f:
                 f.write("#version: 0.2\n")
-                for merge_bytes in merges:
-                    # Convert bytes to string representation
+
+                for merge_bytes, rank in sorted_merges:
                     try:
-                        merge_str = merge_bytes.decode('utf-8')
-                        # Split on spaces or use the bytes representation
-                        parts = merge_str.split()
-                        if len(parts) >= 2:
-                            f.write(f"{parts[0]} {parts[1]}\n")
-                        else:
-                            # Use the full string as-is
-                            f.write(f"{merge_str}\n")
+                        merge_str = merge_bytes.decode('utf-8', errors='ignore')
+
+                        if len(merge_bytes) >= 2:
+                            tokens = []
+                            for byte in merge_bytes:
+                                try:
+                                    tokens.append(chr(byte))
+                                except:
+                                    tokens.append(f"\\x{byte:02x}")
+
+                            if len(tokens) >= 2:
+                                f.write(f"{tokens[0]} {tokens[1]}\n")
+                            else:
+                                half = len(merge_str) // 2
+                                if half > 0:
+                                    f.write(f"{merge_str[:half]} {merge_str[half:]}\n")
                     except:
-                        # If can't decode, skip this merge
                         continue
+
             merges_exported = True
-            print(f"✓ Exported {len(merges)} mergeable ranks")
+            print(f"✓ Exported {len(sorted_merges)} mergeable ranks")
         except Exception as e:
             print(f"⚠ Could not export mergeable_ranks: {e}")
 

@@ -6,14 +6,14 @@ This file provides context and guidelines for AI assistants (Claude) working on 
 
 ## Project Overview
 
-**VoiceClone** is an open-source iOS application for on-device text-to-speech synthesis with voice cloning and voice design capabilities. It uses Qwen3-TTS models converted to CoreML for fully offline operation.
+**VoiceClone** is an open-source iOS application for on-device text-to-speech synthesis with voice cloning and voice design capabilities. It uses Qwen3-TTS models with MLX for fully offline operation.
 
 ### Key Facts
 - **Platform**: iOS 17.0+ (iPhone/iPad)
 - **Language**: Swift 6.0 with strict concurrency
 - **UI Framework**: SwiftUI
-- **ML Framework**: CoreML with ANE optimization
-- **Models**: Qwen3-TTS-12Hz-1.7B (VoiceDesign, CustomVoice)
+- **ML Framework**: MLX (Metal Learning eXtensions)
+- **Models**: Qwen3-TTS-12Hz-1.7B (INT4/INT8 quantized)
 - **License**: Apache 2.0
 
 ---
@@ -26,10 +26,10 @@ This file provides context and guidelines for AI assistants (Claude) working on 
 │  SwiftUI Views → ViewModels → Services                      │
 ├─────────────────────────────────────────────────────────────┤
 │                        Core Layer                           │
-│  TTSService │ MLModelManager │ AudioEngine │ VoiceStorage   │
+│  MLXTTSService │ MLXQwen3TTSModel │ AudioEngine │ Storage   │
 ├─────────────────────────────────────────────────────────────┤
 │                      Infrastructure                         │
-│  CoreML │ AVFoundation │ CoreData │ FileManager            │
+│  MLX │ AVFoundation │ CoreData │ FileManager                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -37,10 +37,8 @@ This file provides context and guidelines for AI assistants (Claude) working on 
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| `TTSService` | `Core/TTS/TTSService.swift` | Main TTS orchestration |
-| `MLModelManager` | `Core/ML/MLModelManager.swift` | Model loading/caching |
-| `TTSInferenceEngine` | `Core/ML/Inference/TTSInferenceEngine.swift` | CoreML inference |
-| `KVCache` | `Core/ML/Inference/KVCache.swift` | Attention KV cache |
+| `MLXTTSService` | `Core/ML/MLX/MLXTTSService.swift` | Main TTS service |
+| `MLXQwen3TTSModel` | `Core/ML/MLX/MLXQwen3TTSModel.swift` | MLX model wrapper |
 | `Qwen3Tokenizer` | `Core/ML/Tokenizer/Qwen3Tokenizer.swift` | Text tokenization |
 | `AudioEngine` | `Core/Audio/AudioEngine.swift` | Playback with streaming |
 
@@ -52,8 +50,8 @@ This file provides context and guidelines for AI assistants (Claude) working on 
 
 ```swift
 // ✅ DO: Use actors for thread-safe state
-actor TTSService {
-    private var state: State = .idle
+actor ModelCache {
+    private var models: [String: MLXQwen3TTSModel] = [:]
 }
 
 // ✅ DO: Use @MainActor for UI-bound classes
@@ -74,11 +72,11 @@ func synthesize() async throws -> AsyncThrowingStream<AudioChunk, Error> { }
 // Types: PascalCase
 struct AudioChunk { }
 enum Language { }
-protocol TTSServiceProtocol { }
+class MLXTTSService { }
 
 // Properties/Methods: camelCase
 let sampleRate: Int
-func loadModel(_ type: ModelType) async throws
+func loadModel(_ type: String) async throws
 
 // Constants: camelCase (not SCREAMING_CASE)
 let maxSequenceLength = 2048
@@ -107,7 +105,7 @@ enum TTSError: LocalizedError {
 
 // ✅ DO: Propagate errors with context
 func synthesize() async throws {
-    guard let model = loadedModel else {
+    guard let model = talkerModel else {
         throw TTSError.modelNotLoaded
     }
 }
@@ -159,13 +157,6 @@ struct SynthesisView: View {
 4. Add to tab navigation in `ContentView.swift`
 5. Write tests in `Tests/UnitTests/NewFeatureTests.swift`
 
-### Adding a New Model Type
-
-1. Add case to `MLModelManager.ModelType` enum
-2. Add model file to `Resources/Models/`
-3. Update `modelURL(for:)` in `MLModelManager`
-4. Add loading logic in `TTSService.loadCapability()`
-
 ### Modifying the Tokenizer
 
 1. Update vocab/merges files in `Resources/Tokenizer/`
@@ -176,8 +167,8 @@ struct SynthesisView: View {
 ### Optimizing Performance
 
 1. Profile with Instruments (Time Profiler, Allocations)
-2. Check memory warnings in `MemoryAwareLoader`
-3. Verify ANE utilization with `coremltools` profiler
+2. Check GPU utilization with Metal System Trace
+3. Verify ANE usage with `sudo powermetrics --samplers gpu_power`
 4. Reduce batch sizes if thermal throttling occurs
 
 ---
@@ -188,16 +179,13 @@ struct SynthesisView: View {
 ```
 Core/
 ├── TTS/
-│   ├── TTSService.swift          # Main service
-│   ├── TTSConfiguration.swift    # Config options
-│   └── TTSError.swift            # Error types
+│   └── TTSTypes.swift            # TTS enums and types
 ├── ML/
-│   ├── MLModelManager.swift      # Model lifecycle
 │   ├── Tokenizer/
 │   │   └── Qwen3Tokenizer.swift  # BPE tokenizer
-│   └── Inference/
-│       ├── TTSInferenceEngine.swift
-│       └── KVCache.swift
+│   └── MLX/
+│       ├── MLXTTSService.swift   # MLX service
+│       └── MLXQwen3TTSModel.swift # Model wrapper
 ├── Audio/
 │   ├── AudioEngine.swift         # Playback
 │   ├── AudioRecorder.swift       # Recording
@@ -210,10 +198,13 @@ Core/
 ### Resource Files
 ```
 Resources/
-├── Models/                       # CoreML models (downloaded)
-│   ├── Qwen3TTS_VoiceDesign_INT4.mlpackage
-│   ├── Qwen3TTS_CustomVoice_INT4.mlpackage
-│   └── Qwen3TTS_SpeechDecoder.mlpackage
+├── MLXModels/
+│   ├── Qwen3TTS_INT4/            # INT4 quantized model
+│   │   ├── config.json
+│   │   └── weights.npz
+│   └── Qwen3TTS_Decoder/         # Speech decoder (future)
+│       ├── config.json
+│       └── weights.npz
 ├── Tokenizer/
 │   ├── vocab.json               # Token vocabulary
 │   ├── merges.txt               # BPE merges
@@ -225,10 +216,8 @@ Resources/
 ### Conversion Scripts
 ```
 scripts/
-├── export_onnx.py               # PyTorch → ONNX
-├── convert_coreml.py            # ONNX → CoreML
-├── quantize_int4.py             # CoreML quantization
-├── segment_model.py             # Model segmentation
+├── convert_mlx.py               # PyTorch → MLX
+├── quantize_int8_tensor.py      # Model quantization
 └── export_tokenizer.py          # Tokenizer export
 ```
 
@@ -267,11 +256,11 @@ final class TokenizerTests: XCTestCase {
 ```swift
 // Use @MainActor for tests involving UI or services
 @MainActor
-final class TTSServiceTests: XCTestCase {
+final class MLXTTSServiceTests: XCTestCase {
 
     func testSynthesisProducesAudio() async throws {
         // Given
-        let service = makeTTSService()
+        let service = makeMLXTTSService()
         try await service.loadCapability(.customVoice)
 
         // When
@@ -305,23 +294,20 @@ final class TTSServiceTests: XCTestCase {
 ```swift
 // Package.swift dependencies
 dependencies: [
+    // MLX Swift bindings
+    .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.1.0"),
+
     // Async utilities
     .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
 
     // Collections
     .package(url: "https://github.com/apple/swift-collections", from: "1.1.0"),
-
-    // Dependency injection
-    .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.2.0"),
-
-    // Tokenizer support (optional)
-    .package(url: "https://github.com/huggingface/swift-transformers", from: "0.1.0"),
 ]
 ```
 
 ### System Frameworks
 
-- **CoreML**: Model inference
+- **MLX**: Metal-accelerated ML inference
 - **AVFoundation**: Audio playback/recording
 - **CoreData**: Voice persistence
 - **Accelerate**: SIMD operations for audio processing
@@ -368,81 +354,59 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Export to ONNX
-python export_onnx.py \
+# Convert to MLX format
+python convert_mlx.py \
     --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --output ./onnx_models
+    --output ./mlx_models/Qwen3TTS_INT4 \
+    --quantize
 
-# Convert to CoreML
-python convert_coreml.py \
-    --onnx ./onnx_models/Qwen3-TTS-12Hz-1.7B-VoiceDesign.onnx \
-    --output ./coreml_models/Qwen3TTS_VoiceDesign.mlpackage
-
-# Quantize to INT4
-python quantize_int4.py \
-    --input ./coreml_models/Qwen3TTS_VoiceDesign.mlpackage \
-    --output ./coreml_models/Qwen3TTS_VoiceDesign_INT4.mlpackage
+# Export tokenizer
+python export_tokenizer.py \
+    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
+    --output ./tokenizer_output
 ```
 
 ---
 
-## Model Export Options
+## MLX Model Export
 
-### Option 1: Simplified Talker (current custom path)
+### Current Implementation
 
-Exports a simplified talker that maps text tokens directly to audio codes without the full generate pipeline. This keeps the CoreML interface stable (`input_ids` -> `audio_codes`) and lets the app run end-to-end, but audio quality and fidelity are not production-grade.
-
-```bash
-# Export simplified talker + real speech decoder
-python export_onnx.py \
-    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --output ./onnx_models \
-    --simple
-```
-
-If ONNX export fails, convert directly from PyTorch:
+The app uses INT4 quantized MLX models for efficient on-device inference:
 
 ```bash
-# Convert simplified talker directly to CoreML
-python convert_coreml.py \
+# Convert and quantize in one step
+python convert_mlx.py \
     --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --simple \
-    --output ./coreml_models/Qwen3TTS_VoiceDesign.mlpackage
-
-# Convert speech decoder directly to CoreML
-python convert_coreml.py \
-    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --decoder \
-    --output ./coreml_models/Qwen3TTS_SpeechDecoder.mlpackage
+    --output ./mlx_models/Qwen3TTS_INT4 \
+    --quantize
 ```
 
-Current blockers:
-- ONNX export can fail with `aten::__ior__` (masking op) in PyTorch 2.3.
-- PyTorch → CoreML conversion for the talker can produce an `.mlpackage` that fails to build an execution plan at runtime (CoreML error -5).
-- Speech decoder conversion currently fails on dynamic padding in CoreML.
+This produces:
+- `config.json` - Model configuration
+- `weights.npz` - INT4 quantized weights (~1GB)
 
-### Option 2: Official Qwen3-TTS Export (future/official path)
+### Audio Output
 
-When Qwen publishes a supported ONNX/CoreML export (or a documented TorchScript path), use it instead of the simplified wrapper. This path should preserve the intended generate logic, codec predictor behavior, and audio quality. It will likely require:
+Currently uses placeholder multi-tone audio. Real speech requires implementing the Qwen3-TTS speech decoder (114M parameters with Snake activation, RVQ, and upsampling layers).
 
-- An exportable generate path (or dedicated inference graph) from Qwen
-- Stable input/output contracts for audio codes and decoder
-- Corresponding updates to `TTSInferenceEngine` to match the official outputs
+See `DECODER_STATUS.md` for decoder implementation details.
 
 ---
 
 ## Debugging Tips
 
-### CoreML Issues
+### MLX Issues
 
 ```swift
-// Enable CoreML debug logging
-UserDefaults.standard.set(true, forKey: "com.apple.CoreML.mlmodel.debugOutput")
+// Check Metal device
+import Metal
+let device = MTLCreateSystemDefaultDevice()
+print("Metal device: \(device?.name ?? "none")")
 
-// Check compute unit assignment
-let config = MLModelConfiguration()
-config.computeUnits = .cpuAndNeuralEngine
-// vs .cpuOnly for debugging
+// Monitor GPU usage
+// Run in Terminal:
+// sudo powermetrics --samplers gpu_power
 ```
 
 ### Memory Issues
@@ -479,8 +443,8 @@ print("Sample Rate: \(session.sampleRate)")
 |--------|--------|---------|
 | First token latency | <500ms | 1000ms |
 | Streaming latency | <150ms | 300ms |
-| Memory peak | <3GB | 3.5GB |
-| Model load time | <8s | 15s |
+| Memory peak | <2GB | 3GB |
+| Model load time | <5s | 10s |
 | Battery per 10min | <5% | 8% |
 
 ---
@@ -497,21 +461,21 @@ print("Sample Rate: \(session.sampleRate)")
 
 ## Known Limitations
 
-1. **Model size**: 1.7B models require ~2GB storage
-2. **Memory**: Peak usage can hit 3GB during inference
+1. **Model size**: 1.7B models require ~1-2GB storage
+2. **Memory**: Peak usage can hit 2GB during inference
 3. **Thermal**: Extended use may cause throttling on older devices
 4. **Languages**: Limited to 10 supported languages
-5. **Audio quality**: INT4 quantization may slightly reduce quality
+5. **Audio quality**: Currently placeholder audio (decoder not implemented)
 
 ---
 
 ## Related Documentation
 
-- [PRD.md](./PRD.md) - Product requirements and full technical architecture
-- [plan.md](./plan.md) - Step-by-step implementation plan
-- [agents.md](./agents.md) - AI agent workflows for development
+- [PRD.md](./PRD.md) - Product requirements and architecture
+- [MLX_INTEGRATION_GUIDE.md](./MLX_INTEGRATION_GUIDE.md) - MLX backend details
+- [DECODER_STATUS.md](./DECODER_STATUS.md) - Speech decoder implementation status
 - [Qwen3-TTS GitHub](https://github.com/QwenLM/Qwen3-TTS) - Original model repository
-- [CoreML Documentation](https://developer.apple.com/documentation/coreml) - Apple's ML framework
+- [MLX Documentation](https://ml-explore.github.io/mlx/build/html/index.html) - MLX framework docs
 
 ---
 
@@ -556,10 +520,13 @@ enum Language: String, CaseIterable {
 ### Changing model quantization
 
 ```python
-# In quantize_int4.py, change bits parameter
-config = OptimizationConfig(
-    global_config=OpPalettizerConfig(
-        nbits=8,  # Change from 4 to 8 for higher quality
-    )
+# In convert_mlx.py, modify quantization bits
+from mlx.nn.layers import Embedding, Linear
+
+# Use INT8 instead of INT4
+nn.quantize(
+    model,
+    group_size=64,
+    bits=8  # Change from 4 to 8 for higher quality
 )
 ```
