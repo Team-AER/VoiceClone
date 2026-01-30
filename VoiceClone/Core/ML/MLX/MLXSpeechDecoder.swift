@@ -166,11 +166,11 @@ public actor MLXSpeechDecoder {
     
     public init(modelPath: URL) async throws {
         // Load config
-        let configURL = modelPath.appendingPathComponent("config.json")
+        let configURL = modelPath.appendingPathComponent("decoder_config.json")
         self.config = try SpeechDecoderConfig.loadFromConfig(at: configURL)
-        
+
         // Load weights
-        let weightsURL = modelPath.appendingPathComponent("weights.npz")
+        let weightsURL = modelPath.appendingPathComponent("decoder_weights.npz")
         self.weights = try MLX.loadArrays(url: weightsURL)
         
         // Initialize RVQ

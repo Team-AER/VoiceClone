@@ -279,9 +279,9 @@ final class MLXTTSService: ObservableObject {
             let docPath = documentsDir
                 .appendingPathComponent("MLXModels", isDirectory: true)
                 .appendingPathComponent("Qwen3TTS_Decoder", isDirectory: true)
-            
-            let configURL = docPath.appendingPathComponent("config.json")
-            let weightsURL = docPath.appendingPathComponent("weights.npz")
+
+            let configURL = docPath.appendingPathComponent("decoder_config.json")
+            let weightsURL = docPath.appendingPathComponent("decoder_weights.npz")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using decoder from Documents: \(docPath.path)")
@@ -303,20 +303,20 @@ final class MLXTTSService: ObservableObject {
         
         for subpath in candidateSubpaths {
             let candidateDir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
-            let configURL = candidateDir.appendingPathComponent("config.json")
-            let weightsURL = candidateDir.appendingPathComponent("weights.npz")
+            let configURL = candidateDir.appendingPathComponent("decoder_config.json")
+            let weightsURL = candidateDir.appendingPathComponent("decoder_weights.npz")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using decoder from Bundle: \(candidateDir.path)")
                 return candidateDir
             }
         }
-        
+
         // 3) Check models directory (for development)
         let modelsDirPath = "/Users/prakhar/Developer/AER/VoiceClone/models/MLXModels/Qwen3TTS_Decoder"
         let modelsURL = URL(fileURLWithPath: modelsDirPath)
-        let configURL = modelsURL.appendingPathComponent("config.json")
-        let weightsURL = modelsURL.appendingPathComponent("weights.npz")
+        let configURL = modelsURL.appendingPathComponent("decoder_config.json")
+        let weightsURL = modelsURL.appendingPathComponent("decoder_weights.npz")
         if FileManager.default.fileExists(atPath: configURL.path) &&
             FileManager.default.fileExists(atPath: weightsURL.path) {
             print("✓ Using decoder from models directory: \(modelsDirPath)")
@@ -344,8 +344,8 @@ final class MLXTTSService: ObservableObject {
                 .appendingPathComponent("MLXModels", isDirectory: true)
                 .appendingPathComponent(modelName, isDirectory: true)
 
-            let configURL = docPath.appendingPathComponent("config.json")
-            let weightsURL = docPath.appendingPathComponent("weights.npz")
+            let configURL = docPath.appendingPathComponent("talker_config.json")
+            let weightsURL = docPath.appendingPathComponent("talker_weights.npz")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using MLX model from Documents: \(docPath.path)")
@@ -367,8 +367,8 @@ final class MLXTTSService: ObservableObject {
 
         for subpath in candidateSubpaths {
             let candidateDir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
-            let configURL = candidateDir.appendingPathComponent("config.json")
-            let weightsURL = candidateDir.appendingPathComponent("weights.npz")
+            let configURL = candidateDir.appendingPathComponent("talker_config.json")
+            let weightsURL = candidateDir.appendingPathComponent("talker_weights.npz")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using MLX model from Bundle: \(candidateDir.path)")
@@ -381,11 +381,11 @@ final class MLXTTSService: ObservableObject {
             "/Users/prakhar/Developer/AER/VoiceClone/VoiceClone/Resources/MLXModels/\(modelName)",
             "/Users/prakhar/Developer/AER/VoiceClone/models/MLXModels/\(modelName)"
         ]
-        
+
         for devPath in devPaths {
             let devURL = URL(fileURLWithPath: devPath)
-            let configURL = devURL.appendingPathComponent("config.json")
-            let weightsURL = devURL.appendingPathComponent("weights.npz")
+            let configURL = devURL.appendingPathComponent("talker_config.json")
+            let weightsURL = devURL.appendingPathComponent("talker_weights.npz")
             if FileManager.default.fileExists(atPath: configURL.path) &&
                 FileManager.default.fileExists(atPath: weightsURL.path) {
                 print("✓ Using MLX model from dev path: \(devPath)")

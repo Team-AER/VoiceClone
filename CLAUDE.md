@@ -82,13 +82,40 @@ xcodebuild test \
 Models are loaded from filesystem paths with a fallback strategy:
 
 1. Documents directory (for production downloaded models)
-2. App bundle (currently NOT used - models too large)
+2. App bundle (for development on physical devices)
 3. Development paths (for running from Xcode):
    - `VoiceClone/Resources/MLXModels/Qwen3TTS_INT4/`
    - `models/MLXModels/Qwen3TTS_INT4/` (talker model)
    - `models/MLXModels/Qwen3TTS_Decoder/` (decoder model)
 
-**Critical**: The talker model (`weights.npz` 1.0GB, `weights.pkl` 1.2GB) and decoder model (`weights.npz` 436MB) are NOT bundled in the app to avoid bloating the IPA. They are kept outside the Xcode project in `models/MLXModels/` and loaded via development path fallback during local development.
+**File Naming Convention** (to prevent Xcode build conflicts):
+- Talker model files: `talker_config.json`, `talker_weights.npz`, `talker_weights.pkl`
+- Decoder model files: `decoder_config.json`, `decoder_weights.npz`
+
+**Critical Development Requirement**: Because MLX requires physical devices (Metal hardware) and physical devices cannot access the Mac's filesystem, models MUST be present in `VoiceClone/Resources/MLXModels/` for development testing. The original filenames were causing "Multiple commands produce" errors in Xcode, so they have been renamed to unique names as listed above.
+
+**Production**: Models are downloaded via On-Demand Resources (ODR) and stored in Documents directory, NOT bundled in the IPA to avoid bloating the app size.
+
+### On-Demand Resources (ODR)
+
+The app uses Apple's On-Demand Resources for production distribution:
+
+**Components:**
+- `ODRManager`: Actor managing download state and requests
+- `ModelDownloadView`: UI for downloading models on first launch
+- Tags: `tts_model_talker` (2.2GB), `tts_model_decoder` (440MB)
+
+**Path Resolution Priority:**
+1. ODR resources (production - downloaded on demand)
+2. Documents directory (manual download fallback)
+3. Bundle resources (legacy - not used in production)
+4. Development paths (Xcode development only)
+
+**Important Notes:**
+- Apple has a 2GB per-tag limit - talker model needs to be split across multiple tags
+- ODR assets may be purged by iOS when storage is low - app detects and re-downloads
+- See `docs/ODR_IMPLEMENTATION_PLAN.md` for setup details
+- See `docs/ODR_IMPLEMENTATION_STATUS.md` for current progress
 
 ## Swift 6 Concurrency Patterns
 
@@ -134,10 +161,11 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 
 ## File Organization Rules
 
-### DO NOT Bundle Large Files
-- Model weights (`.npz`, `.pkl`, `.safetensors`, `.bin`) should NEVER be in `VoiceClone/Resources/` or added to "Copy Bundle Resources" build phase
-- Keep models in `models/MLXModels/` directory (outside Xcode project)
-- `.gitignore` excludes these files
+### Model File Management
+- **Development**: Models MUST be in `VoiceClone/Resources/MLXModels/` for testing on physical devices (required for MLX/Metal). Physical devices cannot access the Mac's filesystem.
+- **Production**: Models are downloaded via ODR (On-Demand Resources) to Documents directory, NOT bundled in the IPA.
+- **Git**: `.gitignore` excludes `.npz` and `.pkl` files to prevent large files from being committed.
+- **File naming**: Models use unique prefixes (`talker_*`, `decoder_*`) to prevent Xcode build conflicts when multiple models are bundled.
 
 ### Core Data
 - Schema defined in `VoiceEntity.swift`
@@ -188,15 +216,29 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 
 ## Production Deployment
 
-For production, implement on-demand model download:
+**Using On-Demand Resources (ODR)** - Currently Implemented:
+- Models are tagged as ODR assets in Xcode
+- Downloaded from Apple's CDN after initial install
+- Managed by `ODRManager` actor
+- UI prompts user to download on first launch
+- Handles iOS purging gracefully
+
+**Next Steps:**
+1. Configure ODR tags in Xcode (see `docs/ODR_IMPLEMENTATION_STATUS.md`)
+2. Split talker model to comply with 2GB per-tag limit
+3. Test via TestFlight on physical devices
+4. Monitor download metrics in App Store Connect
+
+**Alternative: Self-Hosted Downloads** (if ODR fails):
 1. Host models on server (e.g., HuggingFace, S3)
 2. Download to Documents directory on first launch
-3. Show progress UI during download
-4. Verify checksums after download
-5. Update `getModelPath()` to prioritize Documents directory
+3. Verify checksums after download
+4. Requires separate hosting infrastructure
 
 ## Documentation References
 
 - `BUILD_AND_RUN.md`: Detailed build instructions
 - `REMAINING_WORK.md`: Current status and next steps
 - `PRD.md`: Product requirements and technical architecture
+- `docs/ODR_IMPLEMENTATION_PLAN.md`: ODR setup guide
+- `docs/ODR_IMPLEMENTATION_STATUS.md`: ODR implementation progress
