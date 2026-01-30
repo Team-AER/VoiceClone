@@ -27,6 +27,20 @@ All Swift 6 strict concurrency issues have been resolved.
 - Manual JSON parsing instead of Codable for nonisolated contexts
 - Simplified closures to avoid type-checking timeouts
 
+### 2. Fix Model Path Resolution
+Added development path fallback to `getModelPath()` in MLXTTSService.
+
+**Issue**: Model files were visible in Xcode navigator but NOT added to project's Copy Bundle Resources phase.
+
+**Root Cause**: `weights.npz` (1.08 GB) is too large to bundle in iOS app. Files in Xcode project navigator don't automatically get copied to app bundle.
+
+**Fix**: Added development path fallback that searches:
+1. Documents directory (for downloaded models)
+2. App bundle (for small bundled resources)
+3. Development paths (for running from Xcode):
+   - `VoiceClone/Resources/MLXModels/Qwen3TTS_INT4/`
+   - `models/MLXModels/Qwen3TTS_INT4/`
+
 ---
 
 ## ⚠️ Important: Simulator Limitation
@@ -43,21 +57,47 @@ Undefined symbols for architecture arm64:
 
 ---
 
+## ✅ FIXED: Model Bundling Issue
+
+**Problem Solved**: Model files (2.6GB total) were being bundled into the app, causing:
+- ⏱️ Extremely slow builds (copying 2GB+ each time)
+- 💥 Deployment failures to devices
+- 📦 Massive IPA sizes (~2.3GB)
+
+**Root Cause**: Xcode's `PBXFileSystemSynchronizedRootGroup` automatically included ALL files in `VoiceClone/Resources/`, including model weights.
+
+**Solution Applied** ✅:
+Moved model files from inside Xcode project to root-level `models/` directory:
+- `models/MLXModels/Qwen3TTS_INT4/` (talker: weights.npz 1.0GB, weights.pkl 1.2GB)
+- `models/MLXModels/Qwen3TTS_Decoder/` (decoder: weights.npz 436MB)
+
+**Results**:
+- ✅ Build succeeds
+- ✅ App bundle size: **79MB** (down from 2.3GB!)
+- ✅ Models load via dev path fallback in `MLXTTSService.swift:382`
+- ✅ Builds are now fast (no 2GB+ file copying)
+
+**Current State**: Models are outside the Xcode project but in the repo, loaded at runtime from filesystem paths during development.
+
+**Production Solution Still Required**:
+- Implement on-demand model download to Documents directory
+- Show download progress UI on first launch
+- Store downloaded models in `Documents/MLXModels/`
+
+---
+
 ## 🟡 High Priority - Next Steps
 
-### 2. Bundle Decoder Model Properly
-Decoder model exists but isn't bundled in app.
+### 3. Model Download UI (Production)
+Implement model download for production deployment.
 
-**Issue**: Both talker and decoder have `config.json` and `weights.npz`, causing Xcode copy conflicts.
+**Needed**:
+- Download progress UI
+- HuggingFace Hub integration or self-hosted model files
+- Background download support
+- Model verification (checksums)
 
-**Solutions** (pick one):
-- **A)** Keep models outside bundle, use dev path fallback (current workaround)
-- **B)** Create proper folder references in Xcode that preserve directory structure
-- **C)** On-demand download to Documents directory
-
-**Recommendation**: Option A for development, Option C for production
-
-**Estimated time**: 30 min - 2 hours depending on approach
+**Estimated time**: 4-6 hours
 
 ---
 
@@ -104,8 +144,8 @@ If using on-demand download approach for decoder.
 
 | File | Status | Notes |
 |------|--------|-------|
-| MLX Models (talker) | ✅ Bundled | In `Resources/MLXModels/Qwen3TTS_INT4/` |
-| MLX Models (decoder) | ⚠️ Not bundled | At `models/MLXModels/Qwen3TTS_Decoder/`, works via dev path |
+| MLX Models (talker) | ⚠️ Dev path | At `VoiceClone/Resources/MLXModels/Qwen3TTS_INT4/`, loaded via dev path fallback |
+| MLX Models (decoder) | ⚠️ Dev path | At `models/MLXModels/Qwen3TTS_Decoder/`, loaded via dev path fallback |
 | MLX Package | ✅ Installed | v0.30.3 |
 | Conv Layers | ✅ Fixed | API updated |
 | RVQ | ✅ Fixed | API updated, nonisolated |

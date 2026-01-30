@@ -376,6 +376,23 @@ final class MLXTTSService: ObservableObject {
             }
         }
 
+        // 3) Check development paths (for running from Xcode)
+        let devPaths = [
+            "/Users/prakhar/Developer/AER/VoiceClone/VoiceClone/Resources/MLXModels/\(modelName)",
+            "/Users/prakhar/Developer/AER/VoiceClone/models/MLXModels/\(modelName)"
+        ]
+        
+        for devPath in devPaths {
+            let devURL = URL(fileURLWithPath: devPath)
+            let configURL = devURL.appendingPathComponent("config.json")
+            let weightsURL = devURL.appendingPathComponent("weights.npz")
+            if FileManager.default.fileExists(atPath: configURL.path) &&
+                FileManager.default.fileExists(atPath: weightsURL.path) {
+                print("✓ Using MLX model from dev path: \(devPath)")
+                return devURL
+            }
+        }
+
         // Not found
         return nil
     }
