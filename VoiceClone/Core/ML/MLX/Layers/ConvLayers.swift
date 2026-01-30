@@ -36,8 +36,8 @@ struct CausalConv1d {
         
         // Create conv without padding (we'll pad manually)
         self.conv = Conv1d(
-            inChannels: inChannels,
-            outChannels: outChannels,
+            inputChannels: inChannels,
+            outputChannels: outChannels,
             kernelSize: kernelSize,
             stride: stride,
             padding: 0,
@@ -86,8 +86,8 @@ struct DepthwiseSeparableConv {
     init(channels: Int, kernelSize: Int, stride: Int = 1) {
         // Depthwise: each input channel convolved separately
         self.depthwise = Conv1d(
-            inChannels: channels,
-            outChannels: channels,
+            inputChannels: channels,
+            outputChannels: channels,
             kernelSize: kernelSize,
             stride: stride,
             padding: kernelSize / 2,
@@ -96,8 +96,8 @@ struct DepthwiseSeparableConv {
         
         // Pointwise: 1x1 conv to mix channels
         self.pointwise = Conv1d(
-            inChannels: channels,
-            outChannels: channels,
+            inputChannels: channels,
+            outputChannels: channels,
             kernelSize: 1,
             stride: 1,
             padding: 0
@@ -138,8 +138,8 @@ func loadCausalConv1d(
     
     // Create conv layer with weights
     var conv = Conv1d(
-        inChannels: inChannels,
-        outChannels: outChannels,
+        inputChannels: inChannels,
+        outputChannels: outChannels,
         kernelSize: kernelSize,
         stride: stride,
         padding: 0,
@@ -164,8 +164,8 @@ func loadDepthwiseSeparableConv(
     stride: Int = 1
 ) -> DepthwiseSeparableConv {
     let depthwise = Conv1d(
-        inChannels: channels,
-        outChannels: channels,
+        inputChannels: channels,
+        outputChannels: channels,
         kernelSize: kernelSize,
         stride: stride,
         padding: kernelSize / 2,
@@ -173,8 +173,8 @@ func loadDepthwiseSeparableConv(
     )
     
     let pointwise = Conv1d(
-        inChannels: channels,
-        outChannels: channels,
+        inputChannels: channels,
+        outputChannels: channels,
         kernelSize: 1,
         stride: 1,
         padding: 0

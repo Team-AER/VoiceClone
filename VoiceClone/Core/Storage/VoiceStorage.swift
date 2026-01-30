@@ -9,20 +9,20 @@ import CoreData
 /// Manages voice persistence
 actor VoiceStorage {
 
-    private let coreData = CoreDataStack.shared
     private let fileManager = FileManager.default
     private let voicesDirectory: URL
 
     init() {
-        voicesDirectory = fileManager
+        let fm = FileManager.default
+        voicesDirectory = fm
             .urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Voices", isDirectory: true)
 
-        try? fileManager.createDirectory(at: voicesDirectory, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: voicesDirectory, withIntermediateDirectories: true)
     }
 
     func saveVoice(_ voice: Voice) async throws {
-        try await coreData.performBackgroundTask { context in
+        try await CoreDataStack.shared.performBackgroundTask { context in
             let entity = VoiceEntity(context: context)
             entity.id = voice.id
             entity.name = voice.name
@@ -49,8 +49,8 @@ actor VoiceStorage {
     }
 
     func fetchVoices() async throws -> [Voice] {
-        try await coreData.performBackgroundTask { context in
-            let request = VoiceEntity.fetchRequest()
+        try await CoreDataStack.shared.performBackgroundTask { context in
+            let request = NSFetchRequest<VoiceEntity>(entityName: "VoiceEntity")
             request.sortDescriptors = [NSSortDescriptor(keyPath: \VoiceEntity.createdAt, ascending: false)]
 
             let entities = try context.fetch(request)
@@ -81,8 +81,8 @@ actor VoiceStorage {
     }
 
     func deleteVoice(_ id: UUID) async throws {
-        try await coreData.performBackgroundTask { context in
-            let request = VoiceEntity.fetchRequest()
+        try await CoreDataStack.shared.performBackgroundTask { context in
+            let request = NSFetchRequest<VoiceEntity>(entityName: "VoiceEntity")
             request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
 
             if let entity = try context.fetch(request).first {

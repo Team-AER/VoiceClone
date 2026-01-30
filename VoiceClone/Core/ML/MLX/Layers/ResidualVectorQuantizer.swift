@@ -102,7 +102,8 @@ func loadResidualVectorQuantizer(
         } else {
             // Fallback: create random codebook (should not happen with proper weights)
             print("⚠️ Warning: Codebook \(q) not found, using random initialization")
-            let randomCodebook = MLX.random.normal([codebookSize, codebookDim])
+            // Create placeholder codebook (zeros) since we don't have random in MLX 0.30.3
+            let randomCodebook = MLX.zeros([codebookSize, codebookDim])
             codebooks.append(randomCodebook)
         }
     }

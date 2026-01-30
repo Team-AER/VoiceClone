@@ -8,14 +8,14 @@ import MLX
 import MLXNN
 
 // Helper function for SiLU activation (not in MLX by default)
-fileprivate func silu(_ x: MLXArray) -> MLXArray {
+nonisolated fileprivate func silu(_ x: MLXArray) -> MLXArray {
     // SiLU(x) = x * sigmoid(x) = x / (1 + exp(-x))
     return x * sigmoid(x)
 }
 
 
 /// Configuration for Qwen3-TTS MLX model
-struct MLXQwen3TTSConfig: Codable {
+struct MLXQwen3TTSConfig: @unchecked Sendable {
     let hiddenSize: Int
     let numHiddenLayers: Int
     let numAttentionHeads: Int
@@ -25,17 +25,17 @@ struct MLXQwen3TTSConfig: Codable {
     let rmsNormEps: Float
     let numCodeGroups: Int
     let codebookSize: Int
-
-    enum CodingKeys: String, CodingKey {
-        case hiddenSize = "hidden_size"
-        case numHiddenLayers = "num_hidden_layers"
-        case numAttentionHeads = "num_attention_heads"
-        case numKeyValueHeads = "num_key_value_heads"
-        case intermediateSize = "intermediate_size"
-        case vocabSize = "vocab_size"
-        case rmsNormEps = "rms_norm_eps"
-        case numCodeGroups = "num_code_groups"
-        case codebookSize = "codebook_size"
+    
+    init(json: [String: Any]) {
+        self.hiddenSize = json["hidden_size"] as? Int ?? 1024
+        self.numHiddenLayers = json["num_hidden_layers"] as? Int ?? 12
+        self.numAttentionHeads = json["num_attention_heads"] as? Int ?? 16
+        self.numKeyValueHeads = json["num_key_value_heads"] as? Int ?? 16
+        self.intermediateSize = json["intermediate_size"] as? Int ?? 4096
+        self.vocabSize = json["vocab_size"] as? Int ?? 32000
+        self.rmsNormEps = (json["rms_norm_eps"] as? NSNumber)?.floatValue ?? 1e-6
+        self.numCodeGroups = json["num_code_groups"] as? Int ?? 16
+        self.codebookSize = json["codebook_size"] as? Int ?? 192
     }
 }
 
@@ -46,15 +46,19 @@ public actor MLXQwen3TTSModel {
     private let config: MLXQwen3TTSConfig
     private var weights: [String: MLXArray]
 
-    public init(modelPath: URL) async throws {
-        // Load config
+    nonisolated public init(modelPath: URL) async throws {
+        // Load config manually to avoid actor isolation issues
         let configURL = modelPath.appendingPathComponent("config.json")
         let configData = try Data(contentsOf: configURL)
-        self.config = try JSONDecoder().decode(MLXQwen3TTSConfig.self, from: configData)
+        let json = try JSONSerialization.jsonObject(with: configData) as? [String: Any] ?? [:]
+        let loadedConfig = MLXQwen3TTSConfig(json: json)
 
         // Load weights
         let weightsURL = modelPath.appendingPathComponent("weights.npz")
-        self.weights = try MLX.loadArrays(url: weightsURL)
+        let loadedWeights = try MLX.loadArrays(url: weightsURL)
+
+        self.config = loadedConfig
+        self.weights = loadedWeights
 
         print("✓ Loaded MLX model from \(modelPath.lastPathComponent)")
         print("  Layers: \(config.numHiddenLayers)")
@@ -188,8 +192,8 @@ public actor MLXQwen3TTSModel {
 
         if config.numKeyValueHeads < config.numAttentionHeads {
             let nRep = config.numAttentionHeads / config.numKeyValueHeads
-            kHeadsExpanded = kHeads.repeated(nRep, axis: 1)
-            vHeadsExpanded = vHeads.repeated(nRep, axis: 1)
+            kHeadsExpanded = MLX.repeated(kHeads, count: nRep, axis: 1)
+            vHeadsExpanded = MLX.repeated(vHeads, count: nRep, axis: 1)
         } else {
             kHeadsExpanded = kHeads
             vHeadsExpanded = vHeads
@@ -200,7 +204,7 @@ public actor MLXQwen3TTSModel {
         let scores = MLX.matmul(qHeads, kHeadsExpanded.transposed(axes: [0, 1, 3, 2])) * scale
 
         // Causal mask
-        let mask = MLX.triu(MLX.full(seqLen, seqLen, values: Float.infinity), k: 1)
+        let mask = MLX.triu(MLX.full([seqLen, seqLen], values: Float.infinity), k: 1)
         let maskedScores = scores - mask
 
         let weights = MLX.softmax(maskedScores, axis: -1)
