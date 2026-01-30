@@ -34,7 +34,7 @@ final class CoreDataStack {
         try viewContext.save()
     }
 
-    func performBackgroundTask<T>(_ block: @escaping (NSManagedObjectContext) throws -> T) async throws -> T {
+    nonisolated func performBackgroundTask<T: Sendable>(_ block: @escaping @Sendable (NSManagedObjectContext) throws -> T) async throws -> T {
         try await container.performBackgroundTask { context in
             try block(context)
         }

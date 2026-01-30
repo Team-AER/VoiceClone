@@ -11,11 +11,11 @@ import MLX
 
 /// Residual Vector Quantizer for audio codec
 /// Looks up discrete codes in learned codebooks
-struct ResidualVectorQuantizer {
-    let numQuantizers: Int
-    let codebookSize: Int
-    let codebookDim: Int
-    let codebooks: [MLXArray]  // Array of [codebook_size, codebook_dim]
+struct ResidualVectorQuantizer: @unchecked Sendable {
+    nonisolated(unsafe) let numQuantizers: Int
+    nonisolated(unsafe) let codebookSize: Int
+    nonisolated(unsafe) let codebookDim: Int
+    nonisolated(unsafe) let codebooks: [MLXArray]  // Array of [codebook_size, codebook_dim]
     
     /// Initialize RVQ with pre-trained codebooks
     /// - Parameters:
@@ -23,7 +23,7 @@ struct ResidualVectorQuantizer {
     ///   - codebookSize: Size of each codebook (typically 2048)
     ///   - codebookDim: Dimension of codebook vectors (typically 256 or 512)
     ///   - codebooks: Pre-trained codebook embeddings
-    init(numQuantizers: Int, codebookSize: Int, codebookDim: Int, codebooks: [MLXArray]) {
+    nonisolated init(numQuantizers: Int, codebookSize: Int, codebookDim: Int, codebooks: [MLXArray]) {
         self.numQuantizers = numQuantizers
         self.codebookSize = codebookSize
         self.codebookDim = codebookDim
@@ -33,7 +33,7 @@ struct ResidualVectorQuantizer {
     /// Decode audio codes to embeddings
     /// - Parameter codes: Audio codes [batch, num_quantizers, seq_len]
     /// - Returns: Embeddings [batch, seq_len, latent_dim]
-    func decode(_ codes: MLXArray) -> MLXArray {
+    nonisolated func decode(_ codes: MLXArray) -> MLXArray {
         guard codes.ndim == 3 else {
             fatalError("Expected 3D codes [batch, num_quantizers, seq_len], got shape \(codes.shape)")
         }
@@ -84,7 +84,7 @@ struct ResidualVectorQuantizer {
 ///   - codebookDim: Codebook dimension
 ///   - prefix: Prefix for weight keys (e.g., "quantizer.rvq")
 /// - Returns: ResidualVectorQuantizer instance
-func loadResidualVectorQuantizer(
+nonisolated func loadResidualVectorQuantizer(
     from weights: [String: MLXArray],
     numQuantizers: Int,
     codebookSize: Int,

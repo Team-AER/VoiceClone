@@ -26,7 +26,7 @@ struct MLXQwen3TTSConfig: @unchecked Sendable {
     let numCodeGroups: Int
     let codebookSize: Int
     
-    init(json: [String: Any]) {
+    nonisolated init(json: [String: Any]) {
         self.hiddenSize = json["hidden_size"] as? Int ?? 1024
         self.numHiddenLayers = json["num_hidden_layers"] as? Int ?? 12
         self.numAttentionHeads = json["num_attention_heads"] as? Int ?? 16
@@ -61,9 +61,9 @@ public actor MLXQwen3TTSModel {
         self.weights = loadedWeights
 
         print("✓ Loaded MLX model from \(modelPath.lastPathComponent)")
-        print("  Layers: \(config.numHiddenLayers)")
-        print("  Hidden size: \(config.hiddenSize)")
-        print("  Parameters: \(weights.count)")
+        print("  Layers: \(loadedConfig.numHiddenLayers)")
+        print("  Hidden size: \(loadedConfig.hiddenSize)")
+        print("  Parameters: \(loadedWeights.count)")
     }
 
     /// Generate audio codes from text tokens

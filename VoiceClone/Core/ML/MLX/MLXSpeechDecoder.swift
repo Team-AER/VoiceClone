@@ -10,20 +10,30 @@ import Foundation
 import MLX
 import MLXNN
 
+// Helper function for GELU activation
+nonisolated fileprivate func gelu(_ x: MLXArray) -> MLXArray {
+    // GELU(x) = x * Φ(x) where Φ is the Gaussian CDF
+    // Approximation: GELU(x) ≈ 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))
+    let sqrt2OverPi = sqrt(2.0 / Float.pi)
+    let x3 = x * x * x
+    let inner = sqrt2OverPi * (x + 0.044715 * x3)
+    return 0.5 * x * (1.0 + MLX.tanh(inner))
+}
+
 /// Configuration for speech decoder
-struct SpeechDecoderConfig: Codable {
-    let numQuantizers: Int
-    let codebookSize: Int
-    let codebookDim: Int
-    let hiddenSize: Int
-    let latentDim: Int
-    let decoderDim: Int
-    let numHiddenLayers: Int
-    let numAttentionHeads: Int
-    let upsampleRates: [Int]
-    let upscaleRatios: [Int]
-    let outputSampleRate: Int
-    let decodeUpsampleRate: Int
+struct SpeechDecoderConfig: @unchecked Sendable {
+    nonisolated(unsafe) let numQuantizers: Int
+    nonisolated(unsafe) let codebookSize: Int
+    nonisolated(unsafe) let codebookDim: Int
+    nonisolated(unsafe) let hiddenSize: Int
+    nonisolated(unsafe) let latentDim: Int
+    nonisolated(unsafe) let decoderDim: Int
+    nonisolated(unsafe) let numHiddenLayers: Int
+    nonisolated(unsafe) let numAttentionHeads: Int
+    nonisolated(unsafe) let upsampleRates: [Int]
+    nonisolated(unsafe) let upscaleRatios: [Int]
+    nonisolated(unsafe) let outputSampleRate: Int
+    nonisolated(unsafe) let decodeUpsampleRate: Int
     
     enum CodingKeys: String, CodingKey {
         case numQuantizers = "num_quantizers"
@@ -40,50 +50,72 @@ struct SpeechDecoderConfig: Codable {
         case decodeUpsampleRate = "decode_upsample_rate"
     }
     
-    static func loadFromConfig(at url: URL) throws -> SpeechDecoderConfig {
+    nonisolated init(
+        numQuantizers: Int,
+        codebookSize: Int,
+        codebookDim: Int,
+        hiddenSize: Int,
+        latentDim: Int,
+        decoderDim: Int,
+        numHiddenLayers: Int,
+        numAttentionHeads: Int,
+        upsampleRates: [Int],
+        upscaleRatios: [Int],
+        outputSampleRate: Int,
+        decodeUpsampleRate: Int
+    ) {
+        self.numQuantizers = numQuantizers
+        self.codebookSize = codebookSize
+        self.codebookDim = codebookDim
+        self.hiddenSize = hiddenSize
+        self.latentDim = latentDim
+        self.decoderDim = decoderDim
+        self.numHiddenLayers = numHiddenLayers
+        self.numAttentionHeads = numAttentionHeads
+        self.upsampleRates = upsampleRates
+        self.upscaleRatios = upscaleRatios
+        self.outputSampleRate = outputSampleRate
+        self.decodeUpsampleRate = decodeUpsampleRate
+    }
+    
+    nonisolated static func loadFromConfig(at url: URL) throws -> SpeechDecoderConfig {
         let data = try Data(contentsOf: url)
-        let fullConfig = try JSONDecoder().decode([String: AnyCodable].self, from: data)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw DecoderError.configMissing("Invalid JSON format")
+        }
         
         // Extract decoder_config
-        guard let decoderConfigDict = fullConfig["decoder_config"]?.value as? [String: Any] else {
+        guard let decoderConfigDict = json["decoder_config"] as? [String: Any] else {
             throw DecoderError.configMissing("decoder_config not found")
         }
         
-        // Parse decoder config
-        let decoderData = try JSONSerialization.data(withJSONObject: decoderConfigDict)
-        var decoderConfig = try JSONDecoder().decode(SpeechDecoderConfig.self, from: decoderData)
-        
-        // Add top-level fields
-        if let outputSampleRate = fullConfig["output_sample_rate"]?.value as? Int {
-            decoderConfig = SpeechDecoderConfig(
-                numQuantizers: decoderConfig.numQuantizers,
-                codebookSize: decoderConfig.codebookSize,
-                codebookDim: decoderConfig.codebookDim,
-                hiddenSize: decoderConfig.hiddenSize,
-                latentDim: decoderConfig.latentDim,
-                decoderDim: decoderConfig.decoderDim,
-                numHiddenLayers: decoderConfig.numHiddenLayers,
-                numAttentionHeads: decoderConfig.numAttentionHeads,
-                upsampleRates: decoderConfig.upsampleRates,
-                upscaleRatios: decoderConfig.upscaleRatios,
-                outputSampleRate: outputSampleRate,
-                decodeUpsampleRate: fullConfig["decode_upsample_rate"]?.value as? Int ?? 1920
-            )
-        }
-        
-        return decoderConfig
+        // Parse decoder config manually to avoid Codable MainActor issues
+        return SpeechDecoderConfig(
+            numQuantizers: decoderConfigDict["num_quantizers"] as? Int ?? 16,
+            codebookSize: decoderConfigDict["codebook_size"] as? Int ?? 2048,
+            codebookDim: decoderConfigDict["codebook_dim"] as? Int ?? 256,
+            hiddenSize: decoderConfigDict["hidden_size"] as? Int ?? 1024,
+            latentDim: decoderConfigDict["latent_dim"] as? Int ?? 256,
+            decoderDim: decoderConfigDict["decoder_dim"] as? Int ?? 512,
+            numHiddenLayers: decoderConfigDict["num_hidden_layers"] as? Int ?? 4,
+            numAttentionHeads: decoderConfigDict["num_attention_heads"] as? Int ?? 8,
+            upsampleRates: decoderConfigDict["upsample_rates"] as? [Int] ?? [8, 8, 4, 2],
+            upscaleRatios: decoderConfigDict["upsampling_ratios"] as? [Int] ?? [8, 8, 4, 2],
+            outputSampleRate: json["output_sample_rate"] as? Int ?? 24000,
+            decodeUpsampleRate: json["decode_upsample_rate"] as? Int ?? 1920
+        )
     }
 }
 
 /// Helper for decoding arbitrary JSON
-struct AnyCodable: Codable {
-    let value: Any
+struct AnyCodable: Codable, @unchecked Sendable {
+    nonisolated(unsafe) let value: Any
     
-    init(_ value: Any) {
+    nonisolated init(_ value: Any) {
         self.value = value
     }
     
-    init(from decoder: Decoder) throws {
+    nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         
         if let bool = try? container.decode(Bool.self) {
@@ -103,7 +135,7 @@ struct AnyCodable: Codable {
         }
     }
     
-    func encode(to encoder: Encoder) throws {
+    nonisolated func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         
         switch value {
@@ -262,7 +294,7 @@ public actor MLXSpeechDecoder {
         let fc2Weight = weights["\(prefix).fc2.weight"] ?? MLX.zeros([config.hiddenSize, config.hiddenSize * 4])
         
         let hidden = linear(x, weight: fc1Weight)
-        let activated = MLX.gelu(hidden)
+        let activated = gelu(hidden)
         return linear(activated, weight: fc2Weight)
     }
     
@@ -293,7 +325,7 @@ public actor MLXSpeechDecoder {
         
         // Layer norm and activation
         hidden = layerNorm(hidden.transposed(axes: [0, 2, 1]), prefix: "\(prefix).2").transposed(axes: [0, 2, 1])
-        hidden = MLX.gelu(hidden)
+        hidden = gelu(hidden)
         
         return hidden
     }
@@ -360,8 +392,8 @@ public actor MLXSpeechDecoder {
     }
     
     private func layerNorm(_ x: MLXArray, prefix: String) -> MLXArray {
-        let weight = weights["\(prefix).weight"] ?? MLX.ones(x.shape.last!)
-        let bias = weights["\(prefix).bias"] ?? MLX.zeros(x.shape.last!)
+        let weight = weights["\(prefix).weight"] ?? MLX.ones([x.shape.last!])
+        let bias = weights["\(prefix).bias"] ?? MLX.zeros([x.shape.last!])
         
         let mean = MLX.mean(x, axis: -1, keepDims: true)
         let variance = MLX.variance(x, axis: -1, keepDims: true)
@@ -386,7 +418,7 @@ public actor MLXSpeechDecoder {
         let timeSteps = x.shape[2]
         
         // Repeat each time step 'stride' times
-        let upsampled = x.repeated(stride, axis: 2)
+        let upsampled = MLX.repeated(x, count: stride, axis: 2)
         return upsampled
     }
 }

@@ -1,33 +1,49 @@
 # VoiceClone - Remaining Work
 
 **Last Updated**: 2026-01-30
-**Status**: Build failing - MLX API compatibility issues
+**Status**: ✅ BUILD SUCCEEDS (device only - MLX requires Metal hardware)
 
 ---
 
-## 🔴 Critical - Blocking Build
+## ✅ Completed - Build Fixes
 
 ### 1. Fix MLX API Compatibility Issues
-The project uses mlx-swift 0.30.3 but code was written for an older API.
+All Swift 6 strict concurrency issues have been resolved.
 
-**Issues**:
-- `Conv1d` parameter names changed: `inChannels` → `inputChannels`, `outChannels` → `outputChannels` ✅ FIXED
-- `MLX.repeated()` API changed ✅ FIXED  
-- No `MLXRandom` module - need to use different random API ⚠️ WORKAROUND (using zeros)
-- Actor isolation issues with Swift 6 strict concurrency ⚠️ IN PROGRESS
+**Fixed Issues**:
+- `Conv1d` parameter names changed: `inChannels` → `inputChannels`, `outChannels` → `outputChannels` ✅
+- `MLX.repeated()` API changed ✅  
+- No `MLXRandom` module - using zeros as workaround ✅
+- Actor isolation issues with Swift 6 strict concurrency ✅
+- `SpeechDecoderConfig` Codable MainActor isolation ✅
+- `SnakeActivation` and `ResidualVectorQuantizer` nonisolated properties ✅
+- `MLXArray` Sendable crossing actor boundaries ✅
+- Type-checking timeout in complex closures ✅
 
-**Files affected**:
-- `VoiceClone/Core/ML/MLX/MLXQwen3TTSModel.swift` - Actor isolation errors
-- `VoiceClone/Core/ML/MLX/Layers/ConvLayers.swift` - ✅ Fixed
-- `VoiceClone/Core/ML/MLX/Layers/ResidualVectorQuantizer.swift` - ✅ Fixed
-- `VoiceClone/Core/Storage/VoiceStorage.swift` - ✅ Fixed
-- `VoiceClone/Core/Storage/CoreDataStack.swift` - Sendable closure error
-
-**Estimated time**: 1-2 hours
+**Key Patterns Used**:
+- `nonisolated(unsafe)` for stored properties that need cross-isolation access
+- `@unchecked Sendable` for data-holding structs
+- `@preconcurrency import MLX` to suppress Sendable warnings for MLXArray
+- Manual JSON parsing instead of Codable for nonisolated contexts
+- Simplified closures to avoid type-checking timeouts
 
 ---
 
-## 🟡 High Priority - After Build Fixes
+## ⚠️ Important: Simulator Limitation
+
+**MLX does not work on iOS Simulator** - it requires Metal hardware features that are only available on physical iOS devices. The build will fail with linker errors on simulator:
+
+```
+Undefined symbols for architecture arm64:
+  "_MTLIOErrorDomain", referenced from: ...
+  "_MTLTensorDomain", referenced from: ...
+```
+
+**Solution**: Build and run on a physical iOS device.
+
+---
+
+## 🟡 High Priority - Next Steps
 
 ### 2. Bundle Decoder Model Properly
 Decoder model exists but isn't bundled in app.
@@ -45,13 +61,13 @@ Decoder model exists but isn't bundled in app.
 
 ---
 
-### 3. Run E2E Tests
-Once build succeeds:
+### 3. Run E2E Tests on Device
+Requires physical iOS device:
 - Unit tests for MLX layers (Snake, RVQ, Conv)
 - Integration tests for MLXTTSService
 - E2E synthesis tests (with real decoder)
 
-**Estimated time**: 30 min
+**Estimated time**: 30 min (with device)
 
 ---
 
@@ -84,25 +100,6 @@ If using on-demand download approach for decoder.
 
 ---
 
-## Current Blockers (In Priority Order)
-
-1. **Actor isolation in `MLXQwen3TTSConfig.init(json:)`** - Need nonisolated init
-2. **Sendable closure in `CoreDataStack.performBackgroundTask`** - Need @Sendable annotation
-3. Build must succeed before any testing
-
----
-
-## Quick Wins
-
-These can be done immediately after build succeeds:
-
-- Remove placeholder audio warnings from logs
-- Update documentation to reflect real decoder usage
-- Add performance metrics logging
-- Create build/run instructions for new developers
-
----
-
 ## Files Status
 
 | File | Status | Notes |
@@ -111,22 +108,49 @@ These can be done immediately after build succeeds:
 | MLX Models (decoder) | ⚠️ Not bundled | At `models/MLXModels/Qwen3TTS_Decoder/`, works via dev path |
 | MLX Package | ✅ Installed | v0.30.3 |
 | Conv Layers | ✅ Fixed | API updated |
-| RVQ | ✅ Fixed | API updated |
-| MLXQwen3TTSModel | ⚠️ Actor issue | Init isolation problem |
-| MLXTTSService | ✅ Ready | With decoder integration |
-| MLXSpeechDecoder | ✅ Complete | Full implementation |
-| VoiceStorage | ⚠️ Actor issue | CoreDataStack sendable |
-| Tests | ⏳ Pending | Can't run until build succeeds |
+| RVQ | ✅ Fixed | API updated, nonisolated |
+| SnakeActivation | ✅ Fixed | nonisolated(unsafe) properties |
+| MLXQwen3TTSModel | ✅ Fixed | nonisolated init |
+| MLXSpeechDecoder | ✅ Fixed | Manual JSON parsing, nonisolated |
+| MLXTTSService | ✅ Fixed | @preconcurrency import MLX |
+| CoreDataStack | ✅ Fixed | nonisolated performBackgroundTask |
+| VoiceStorage | ✅ Fixed | Works with CoreDataStack |
+| TTSTypes | ✅ Fixed | Added TTSError enum |
+| Tests | ⏳ Pending | Requires physical device |
+
+---
+
+## Build Commands
+
+```bash
+# Build for device (WORKS)
+xcodebuild build \
+  -project VoiceClone.xcodeproj \
+  -scheme VoiceClone \
+  -destination 'generic/platform=iOS'
+
+# Build for simulator (WILL FAIL - MLX needs Metal hardware)
+# xcodebuild build \
+#   -project VoiceClone.xcodeproj \
+#   -scheme VoiceClone \
+#   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+
+# Run tests (requires physical device)
+xcodebuild test \
+  -project VoiceClone.xcodeproj \
+  -scheme VoiceClone \
+  -destination 'platform=iOS,name=Your Device Name'
+```
 
 ---
 
 ## Next Immediate Steps
 
-1. Fix `MLXQwen3TTSConfig` actor isolation (5 min)
-2. Fix `CoreDataStack` Sendable closure (5 min)
-3. Build and verify compilation (2 min)
-4. Run unit tests (5 min)
-5. Test real synthesis with decoder (10 min)
-6. Update documentation (10 min)
+1. ~~Fix `MLXQwen3TTSConfig` actor isolation~~ ✅
+2. ~~Fix `CoreDataStack` Sendable closure~~ ✅
+3. ~~Build and verify compilation~~ ✅
+4. Run unit tests on physical device (requires device)
+5. Test real synthesis with decoder (requires device)
+6. Update documentation
 
-**Total estimated time to working state**: 30-45 minutes
+**Current state**: Build succeeds, ready for device testing

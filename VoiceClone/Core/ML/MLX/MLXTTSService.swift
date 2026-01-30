@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import MLX
+@preconcurrency import MLX
 import AVFoundation
 import Combine
 
@@ -91,76 +91,74 @@ final class MLXTTSService: ObservableObject {
             throw TTSError.modelNotLoaded
         }
 
-        return AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    // Tokenize input
-                    let tokens = self.tokenizer.encode(
-                        text: text,
-                        language: language,
-                        instruction: instruction
-                    )
-                    guard !tokens.isEmpty else {
-                        throw TTSError.tokenizationFailed
-                    }
-
-                    print("MLX: Synthesizing \(tokens.count) tokens...")
-
-                    // Generate audio codes on background thread
-                    let audioCodes = try await Task.detached(priority: .userInitiated) {
-                        // Convert to MLX array [1, seq_len]
-                        let inputIds = MLX.array(tokens.map { Int32($0) }).reshaped(1, tokens.count)
-
-                        // Generate audio codes [1, 16, seq_len]
-                        return try await talker.generate(inputIds: inputIds)
-                    }.value
-
-                    // Decode audio codes to waveform
-                    let samples: [Float]
-                    let sampleRate = 24000
-                    
-                    if let decoder = await self.decoderModel {
-                        // Use real decoder
-                        let waveform = try await Task.detached(priority: .userInitiated) {
-                            try await decoder.decode(audioCodes)
-                        }.value
-                        
-                        // Convert MLXArray to [Float]
-                        samples = Array(waveform.asArray(Float.self))
-                        print("✓ Decoded \(samples.count) audio samples")
-                    } else {
-                        // Fallback to placeholder audio
-                        let duration = Float(tokens.count) * 0.05  // ~50ms per token
-                        let numSamples = Int(Float(sampleRate) * duration)
-                        
-                        samples = (0..<numSamples).map { i -> Float in
-                            let freq1 = sin(Float(i) * 2.0 * .pi * 440.0 / Float(sampleRate))
-                            let freq2 = sin(Float(i) * 2.0 * .pi * 554.0 / Float(sampleRate)) * 0.5
-                            return (freq1 + freq2) * 0.1
-                        }
-                        print("⚠️ Using placeholder audio (decoder not loaded)")
-                    }
-
-                    let chunk = AudioChunk(
-                        samples: samples,
-                        sampleRate: sampleRate,
-                        timestamp: Date().timeIntervalSince1970
-                    )
-
-                    continuation.yield(chunk)
-                    continuation.finish()
-
-                    await MainActor.run {
-                        self.state = .ready
-                    }
-                } catch {
-                    continuation.finish(throwing: error)
-                    await MainActor.run {
-                        self.state = .error(error.localizedDescription)
-                    }
-                }
+        return AsyncThrowingStream<AudioChunk, Error> { (continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation) in
+            Task { @MainActor in
+                await self.performSynthesis(
+                    tokens: self.tokenizer.encode(text: text, language: language, instruction: instruction),
+                    talker: talker,
+                    continuation: continuation
+                )
             }
         }
+    }
+    
+    private func performSynthesis(
+        tokens: [Int],
+        talker: MLXQwen3TTSModel,
+        continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation
+    ) async {
+        do {
+            guard !tokens.isEmpty else {
+                throw TTSError.tokenizationFailed
+            }
+
+            print("MLX: Synthesizing \(tokens.count) tokens...")
+
+            // Generate audio codes - talker is an actor, so call directly
+            let inputIds = MLXArray(tokens.map { Int32($0) }).reshaped(1, tokens.count)
+            let audioCodes = try await talker.generate(inputIds: inputIds)
+
+            // Decode audio codes to waveform
+            let samples: [Float]
+            let sampleRate = 24000
+            
+            if let decoder = self.decoderModel {
+                let waveform = try await decoder.decode(audioCodes)
+                samples = Array(waveform.asArray(Float.self))
+                print("✓ Decoded \(samples.count) audio samples")
+            } else {
+                // Fallback to placeholder audio
+                let duration = Float(tokens.count) * 0.05
+                let numSamples = Int(Float(sampleRate) * duration)
+                samples = Self.generatePlaceholderSamples(count: numSamples, sampleRate: sampleRate)
+                print("⚠️ Using placeholder audio (decoder not loaded)")
+            }
+
+            let chunk = AudioChunk(
+                samples: samples,
+                sampleRate: sampleRate,
+                timestamp: Date().timeIntervalSince1970
+            )
+
+            continuation.yield(chunk)
+            continuation.finish()
+            self.state = .ready
+        } catch {
+            continuation.finish(throwing: error)
+            self.state = .error(error.localizedDescription)
+        }
+    }
+    
+    private static func generatePlaceholderSamples(count: Int, sampleRate: Int) -> [Float] {
+        let sr = Float(sampleRate)
+        var samples = [Float](repeating: 0, count: count)
+        for i in 0..<count {
+            let t = Float(i)
+            let freq1: Float = sin(t * 2.0 * .pi * 440.0 / sr)
+            let freq2: Float = sin(t * 2.0 * .pi * 554.0 / sr) * 0.5
+            samples[i] = (freq1 + freq2) * 0.1
+        }
+        return samples
     }
 
     func synthesize(
@@ -179,73 +177,68 @@ final class MLXTTSService: ObservableObject {
             throw TTSError.modelNotLoaded
         }
 
-        return AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    // Tokenize with speaker embedding
-                    let speakerInstruction = instruction ?? "Speak naturally as \(speaker.rawValue)."
-                    let tokens = self.tokenizer.encode(
-                        text: text,
-                        language: language,
-                        instruction: "<|speaker:\(speaker.embeddingId)|> \(speakerInstruction)"
-                    )
-                    guard !tokens.isEmpty else {
-                        throw TTSError.tokenizationFailed
-                    }
-
-                    print("MLX: Synthesizing \(tokens.count) tokens with speaker \(speaker.rawValue)...")
-
-                    // Generate audio codes
-                    let audioCodes = try await Task.detached(priority: .userInitiated) {
-                        let inputIds = MLX.array(tokens.map { Int32($0) }).reshaped(1, tokens.count)
-                        return try await talker.generate(inputIds: inputIds)
-                    }.value
-
-                    // Decode audio codes to waveform
-                    let samples: [Float]
-                    let sampleRate = 24000
-                    
-                    if let decoder = await self.decoderModel {
-                        // Use real decoder
-                        let waveform = try await Task.detached(priority: .userInitiated) {
-                            try await decoder.decode(audioCodes)
-                        }.value
-                        
-                        // Convert MLXArray to [Float]
-                        samples = Array(waveform.asArray(Float.self))
-                        print("✓ Decoded \(samples.count) audio samples")
-                    } else {
-                        // Fallback to placeholder audio
-                        let duration = Float(tokens.count) * 0.05
-                        let numSamples = Int(Float(sampleRate) * duration)
-                        
-                        samples = (0..<numSamples).map { i -> Float in
-                            let freq1 = sin(Float(i) * 2.0 * .pi * 440.0 / Float(sampleRate))
-                            let freq2 = sin(Float(i) * 2.0 * .pi * 554.0 / Float(sampleRate)) * 0.5
-                            return (freq1 + freq2) * 0.1
-                        }
-                        print("⚠️ Using placeholder audio (decoder not loaded)")
-                    }
-
-                    let chunk = AudioChunk(
-                        samples: samples,
-                        sampleRate: sampleRate,
-                        timestamp: Date().timeIntervalSince1970
-                    )
-
-                    continuation.yield(chunk)
-                    continuation.finish()
-
-                    await MainActor.run {
-                        self.state = .ready
-                    }
-                } catch {
-                    continuation.finish(throwing: error)
-                    await MainActor.run {
-                        self.state = .error(error.localizedDescription)
-                    }
-                }
+        let speakerInstruction = instruction ?? "Speak naturally as \(speaker.rawValue)."
+        let tokens = self.tokenizer.encode(
+            text: text,
+            language: language,
+            instruction: "<|speaker:\(speaker.embeddingId)|> \(speakerInstruction)"
+        )
+        
+        return AsyncThrowingStream<AudioChunk, Error> { (continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation) in
+            Task { @MainActor in
+                await self.performSynthesisWithSpeaker(
+                    tokens: tokens,
+                    speaker: speaker,
+                    talker: talker,
+                    continuation: continuation
+                )
             }
+        }
+    }
+    
+    private func performSynthesisWithSpeaker(
+        tokens: [Int],
+        speaker: PresetVoice,
+        talker: MLXQwen3TTSModel,
+        continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation
+    ) async {
+        do {
+            guard !tokens.isEmpty else {
+                throw TTSError.tokenizationFailed
+            }
+
+            print("MLX: Synthesizing \(tokens.count) tokens with speaker \(speaker.rawValue)...")
+
+            // Generate audio codes - talker is an actor, so call directly
+            let inputIds = MLXArray(tokens.map { Int32($0) }).reshaped(1, tokens.count)
+            let audioCodes = try await talker.generate(inputIds: inputIds)
+
+            // Decode audio codes to waveform
+            let samples: [Float]
+            let sampleRate = 24000
+            
+            if let decoder = self.decoderModel {
+                let waveform = try await decoder.decode(audioCodes)
+                samples = Array(waveform.asArray(Float.self))
+                print("✓ Decoded \(samples.count) audio samples")
+            } else {
+                let numSamples = Int(Float(tokens.count) * 0.05 * Float(sampleRate))
+                samples = Self.generatePlaceholderSamples(count: numSamples, sampleRate: sampleRate)
+                print("⚠️ Using placeholder audio (decoder not loaded)")
+            }
+
+            let chunk = AudioChunk(
+                samples: samples,
+                sampleRate: sampleRate,
+                timestamp: Date().timeIntervalSince1970
+            )
+
+            continuation.yield(chunk)
+            continuation.finish()
+            self.state = .ready
+        } catch {
+            continuation.finish(throwing: error)
+            self.state = .error(error.localizedDescription)
         }
     }
 
