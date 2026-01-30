@@ -1,32 +1,54 @@
 # macOS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Xcode
 build/
 DerivedData/
 *.pbxuser
+!default.pbxuser
 *.mode1v3
+!default.mode1v3
 *.mode2v3
+!default.mode2v3
 *.perspectivev3
+!default.perspectivev3
 xcuserdata/
 *.xccheckout
 *.xcscmblueprint
 *.moved-aside
 *.xcuserstate
 *.xcuserdatad
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
 
-# SwiftPM
+# Swift Package Manager
 .build/
 Packages/
 Package.pins
 Package.resolved
 .swiftpm/
+*.xcodeproj/xcshareddata/swiftpm/
 
 # CocoaPods
 Pods/
+*.podspec
+Podfile.lock
 
 # Carthage
 Carthage/Build/
+Carthage/Checkouts/
+
+# Accio
+Dependencies/
+.accio/
 
 # SwiftLint
 .swiftlint.cache
@@ -34,32 +56,133 @@ Carthage/Build/
 # Fastlane
 fastlane/report.xml
 fastlane/Preview.html
-fastlane/screenshots/
+fastlane/screenshots/**/*.png
 fastlane/test_output/
+fastlane/readme.md
+
+# Code coverage
+*.gcno
+*.gcda
+coverage/
+*.profdata
+*.profraw
 
 # Archives
 *.xcarchive
-*.ipa
-*.dSYM
-*.dSYM.zip
 
-# Core ML / model artifacts
-*.mlmodelc/
-*.mlpackage/
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Intermediate Files
+*.swiftdeps
+*.swiftmodule
+*.swiftsourceinfo
+
+# Backup files
+*~.nib
+*~
+*.bak
+*.swp
+*.swo
+*.orig
+CLAUDE.md.bak
+
+# Temporary files
+tmp/
+temp/
+*.tmp
 
 # Logs
 *.log
+logs/
+
+# MLX Models (large files - download separately)
+VoiceClone/Resources/MLXModels/*/weights.npz
+VoiceClone/Resources/MLXModels/*/weights.pkl
+scripts/mlx_models/*/weights.npz
+scripts/mlx_models/*/weights.pkl
+*.npz
+*.pkl
+
+# CoreML artifacts (deprecated - should not be in repo)
+*.mlmodelc/
+*.mlpackage/
+*.mlmodel
+
+# ONNX artifacts (deprecated - should not be in repo)
+*.onnx
 
 # Python
 .venv/
+venv/
+env/
+ENV/
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+*.egg-info/
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# VS Code
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDEs
 .vscode/
-
-# JetBrains
 .idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
 
-# Node
+# Node (if using for any tooling)
 node_modules/
+npm-debug.log
+yarn-error.log
+
+# Documentation artifacts
+docs/_build/
+site/
+
+# Test outputs
+test_output/
+scripts/test_output/
+
+# Downloaded models (mark for Git LFS or separate download)
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Hugging Face cache
+.cache/huggingface/
+transformers_cache/
+
+# macOS specific
+.fseventsd/
+.TemporaryItems/
+.DocumentRevisions-V100/
+.Spotlight-V100/
+.TemporaryItems/
+Network Trash Folder/
+Temporary Items/
+.apdisk/
+
+# Backup documentation (keep only final versions)
+*.md.bak
+*_backup.md
+*_old.md

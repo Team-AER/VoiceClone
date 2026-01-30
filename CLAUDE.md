@@ -202,9 +202,6 @@ Resources/
 │   ├── Qwen3TTS_INT4/            # INT4 quantized model
 │   │   ├── config.json
 │   │   └── weights.npz
-│   └── Qwen3TTS_Decoder/         # Speech decoder (future)
-│       ├── config.json
-│       └── weights.npz
 ├── Tokenizer/
 │   ├── vocab.json               # Token vocabulary
 │   ├── merges.txt               # BPE merges
@@ -212,6 +209,8 @@ Resources/
 └── PresetVoices/
     └── voices.json              # Built-in voice metadata
 ```
+
+Decoder model (not bundled): `models/MLXModels/Qwen3TTS_Decoder/`
 
 ### Conversion Scripts
 ```
