@@ -23,7 +23,7 @@ final class MLXTTSService: ObservableObject {
     // MARK: - Private Properties
 
     private var talkerModel: MLXQwen3TTSModel?
-    private var decoderModel: MLXQwen3TTSModel?  // Would be separate decoder
+    private var decoderModel: MLXSpeechDecoder?
     private let tokenizer: Qwen3Tokenizer
     private let audioEngine: AudioEngine
 
@@ -41,17 +41,30 @@ final class MLXTTSService: ObservableObject {
 
         do {
             // Get model path from bundle
-            guard let modelPath = getModelPath(for: capability) else {
+            guard let talkerPath = getModelPath(for: capability) else {
                 throw TTSError.modelNotFound(capability)
             }
 
             // Load talker model on background thread
-            let model = try await Task.detached(priority: .userInitiated) {
-                try await MLXQwen3TTSModel(modelPath: modelPath)
+            let talker = try await Task.detached(priority: .userInitiated) {
+                try await MLXQwen3TTSModel(modelPath: talkerPath)
             }.value
 
+            // Load decoder model if available
+            let decoder: MLXSpeechDecoder?
+            if let decoderPath = getDecoderPath() {
+                decoder = try await Task.detached(priority: .userInitiated) {
+                    try await MLXSpeechDecoder(modelPath: decoderPath)
+                }.value
+                print("✓ Speech decoder loaded")
+            } else {
+                decoder = nil
+                print("⚠️ Speech decoder not found, using placeholder audio")
+            }
+
             await MainActor.run {
-                self.talkerModel = model
+                self.talkerModel = talker
+                self.decoderModel = decoder
                 self.loadedCapabilities.insert(capability)
                 self.state = .ready
             }
@@ -102,19 +115,30 @@ final class MLXTTSService: ObservableObject {
                         return try await talker.generate(inputIds: inputIds)
                     }.value
 
-                    // Convert to AudioChunk and yield
-                    // TODO: In real implementation, decode codes to waveform using speech decoder
-                    // For now, create placeholder audio
+                    // Decode audio codes to waveform
+                    let samples: [Float]
                     let sampleRate = 24000
-                    let duration = Float(tokens.count) * 0.05  // ~50ms per token
-                    let numSamples = Int(Float(sampleRate) * duration)
-
-                    // Generate placeholder sine wave (multi-tone for better sound)
-                    let samples = (0..<numSamples).map { i -> Float in
-                        let t = Float(i) / Float(sampleRate)
-                        let freq1 = sin(Float(i) * 2.0 * .pi * 440.0 / Float(sampleRate))
-                        let freq2 = sin(Float(i) * 2.0 * .pi * 554.0 / Float(sampleRate)) * 0.5
-                        return (freq1 + freq2) * 0.1
+                    
+                    if let decoder = await self.decoderModel {
+                        // Use real decoder
+                        let waveform = try await Task.detached(priority: .userInitiated) {
+                            try await decoder.decode(audioCodes)
+                        }.value
+                        
+                        // Convert MLXArray to [Float]
+                        samples = Array(waveform.asArray(Float.self))
+                        print("✓ Decoded \(samples.count) audio samples")
+                    } else {
+                        // Fallback to placeholder audio
+                        let duration = Float(tokens.count) * 0.05  // ~50ms per token
+                        let numSamples = Int(Float(sampleRate) * duration)
+                        
+                        samples = (0..<numSamples).map { i -> Float in
+                            let freq1 = sin(Float(i) * 2.0 * .pi * 440.0 / Float(sampleRate))
+                            let freq2 = sin(Float(i) * 2.0 * .pi * 554.0 / Float(sampleRate)) * 0.5
+                            return (freq1 + freq2) * 0.1
+                        }
+                        print("⚠️ Using placeholder audio (decoder not loaded)")
                     }
 
                     let chunk = AudioChunk(
@@ -177,16 +201,30 @@ final class MLXTTSService: ObservableObject {
                         return try await talker.generate(inputIds: inputIds)
                     }.value
 
-                    // Convert to audio (placeholder)
+                    // Decode audio codes to waveform
+                    let samples: [Float]
                     let sampleRate = 24000
-                    let duration = Float(tokens.count) * 0.05
-                    let numSamples = Int(Float(sampleRate) * duration)
-
-                    let samples = (0..<numSamples).map { i -> Float in
-                        let t = Float(i) / Float(sampleRate)
-                        let freq1 = sin(Float(i) * 2.0 * .pi * 440.0 / Float(sampleRate))
-                        let freq2 = sin(Float(i) * 2.0 * .pi * 554.0 / Float(sampleRate)) * 0.5
-                        return (freq1 + freq2) * 0.1
+                    
+                    if let decoder = await self.decoderModel {
+                        // Use real decoder
+                        let waveform = try await Task.detached(priority: .userInitiated) {
+                            try await decoder.decode(audioCodes)
+                        }.value
+                        
+                        // Convert MLXArray to [Float]
+                        samples = Array(waveform.asArray(Float.self))
+                        print("✓ Decoded \(samples.count) audio samples")
+                    } else {
+                        // Fallback to placeholder audio
+                        let duration = Float(tokens.count) * 0.05
+                        let numSamples = Int(Float(sampleRate) * duration)
+                        
+                        samples = (0..<numSamples).map { i -> Float in
+                            let freq1 = sin(Float(i) * 2.0 * .pi * 440.0 / Float(sampleRate))
+                            let freq2 = sin(Float(i) * 2.0 * .pi * 554.0 / Float(sampleRate)) * 0.5
+                            return (freq1 + freq2) * 0.1
+                        }
+                        print("⚠️ Using placeholder audio (decoder not loaded)")
                     }
 
                     let chunk = AudioChunk(
@@ -241,6 +279,59 @@ final class MLXTTSService: ObservableObject {
     }
 
     // MARK: - Helper Methods
+
+    private func getDecoderPath() -> URL? {
+        // 1) Try Documents directory first
+        if let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let docPath = documentsDir
+                .appendingPathComponent("MLXModels", isDirectory: true)
+                .appendingPathComponent("Qwen3TTS_Decoder", isDirectory: true)
+            
+            let configURL = docPath.appendingPathComponent("config.json")
+            let weightsURL = docPath.appendingPathComponent("weights.npz")
+            if FileManager.default.fileExists(atPath: configURL.path) &&
+                FileManager.default.fileExists(atPath: weightsURL.path) {
+                print("✓ Using decoder from Documents: \(docPath.path)")
+                return docPath
+            }
+        }
+        
+        // 2) Try bundle resources
+        guard let resourcesRoot = Bundle.main.resourceURL else {
+            return nil
+        }
+        
+        let candidateSubpaths = [
+            "Resources/MLXModels/Qwen3TTS_Decoder",
+            "MLXModels/Qwen3TTS_Decoder",
+            "Resources/Qwen3TTS_Decoder",
+            "Qwen3TTS_Decoder"
+        ]
+        
+        for subpath in candidateSubpaths {
+            let candidateDir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
+            let configURL = candidateDir.appendingPathComponent("config.json")
+            let weightsURL = candidateDir.appendingPathComponent("weights.npz")
+            if FileManager.default.fileExists(atPath: configURL.path) &&
+                FileManager.default.fileExists(atPath: weightsURL.path) {
+                print("✓ Using decoder from Bundle: \(candidateDir.path)")
+                return candidateDir
+            }
+        }
+        
+        // 3) Check models directory (for development)
+        let modelsDirPath = "/Users/prakhar/Developer/AER/VoiceClone/models/MLXModels/Qwen3TTS_Decoder"
+        let modelsURL = URL(fileURLWithPath: modelsDirPath)
+        let configURL = modelsURL.appendingPathComponent("config.json")
+        let weightsURL = modelsURL.appendingPathComponent("weights.npz")
+        if FileManager.default.fileExists(atPath: configURL.path) &&
+            FileManager.default.fileExists(atPath: weightsURL.path) {
+            print("✓ Using decoder from models directory: \(modelsDirPath)")
+            return modelsURL
+        }
+        
+        return nil
+    }
 
     private func getModelPath(for capability: TTSCapability) -> URL? {
         // Determine model name per capability
