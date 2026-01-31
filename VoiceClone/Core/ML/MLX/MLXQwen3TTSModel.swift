@@ -69,9 +69,23 @@ public actor MLXQwen3TTSModel {
         print("  Hidden size: \(loadedConfig.hiddenSize)")
         print("  Parameters: \(loadedWeights.count)")
         
-        // Print first few weight keys for debugging
-        let weightKeys = loadedWeights.keys.sorted().prefix(5)
-        print("  Sample weights: \(weightKeys.joined(separator: ", "))")
+        // Print weight key structure for debugging
+        let allKeys = loadedWeights.keys.sorted()
+        print("\n🔍 WEIGHT KEY STRUCTURE:")
+        print("  First 20 keys:")
+        for (idx, key) in allKeys.prefix(20).enumerated() {
+            let shape = loadedWeights[key]?.shape ?? []
+            print("    [\(idx)]: \(key) -> \(shape)")
+        }
+        
+        // Detect unique top-level prefixes
+        let prefixes = Set(allKeys.compactMap { $0.split(separator: ".").first.map(String.init) })
+        print("\n  Unique top-level prefixes: \(prefixes.sorted().joined(separator: ", "))")
+        
+        // Check for embedding-related keys
+        let embedKeys = allKeys.filter { $0.lowercased().contains("embed") }.prefix(10)
+        print("  Embedding-related keys: \(embedKeys.joined(separator: ", "))")
+        print("")
     }
 
     /// Generate audio codes from text tokens
@@ -87,10 +101,10 @@ public actor MLXQwen3TTSModel {
         let seqLen = inputIds.shape[1]
 
         // Text embeddings
-        var hidden = embedTokens(inputIds)
+        var hidden = try embedTokens(inputIds)
 
         // Text projection
-        hidden = textProjection(hidden)
+        hidden = try textProjection(hidden)
 
         // Transformer layers
         for layer in 0..<config.numHiddenLayers {
@@ -98,10 +112,10 @@ public actor MLXQwen3TTSModel {
         }
 
         // Final norm
-        hidden = rmsNorm(hidden, weight: weights["norm.weight"]!, eps: config.rmsNormEps)
+        hidden = try rmsNorm(hidden, weightKey: "norm.weight", eps: config.rmsNormEps)
 
         // Codec head
-        let codecLogits = linear(hidden, weight: weights["codec_head.weight"]!)
+        let codecLogits = try linear(hidden, weightKey: "codec_head.weight")
 
         // Reshape for multi-codebook: [batch, seq, num_groups * codebook_size] -> [batch, seq, num_groups, codebook_size]
         let reshaped = codecLogits.reshaped(
@@ -121,9 +135,42 @@ public actor MLXQwen3TTSModel {
     }
 
     // MARK: - Model Components
+    
+    /// Safely retrieve a weight tensor by key
+    private func getWeight(_ key: String) throws -> MLXArray {
+        guard let weight = weights[key] else {
+            print("❌ ERROR: Weight '\(key)' not found")
+            print("Available keys containing '\(key.split(separator: ".").first ?? "")':")
+            let relatedKeys = weights.keys.filter { $0.contains(key.split(separator: ".").first ?? "") }
+            relatedKeys.sorted().prefix(10).forEach { print("  - \($0)") }
+            throw MLXError.loadFailed("Weight '\(key)' not found in model")
+        }
+        return weight
+    }
 
-    private func embedTokens(_ inputIds: MLXArray) -> MLXArray {
-        let embedWeight = weights["embed_tokens.weight"]!
+    private func embedTokens(_ inputIds: MLXArray) throws -> MLXArray {
+        // First, try to find any key containing "embed" in the weights
+        let allEmbedKeys = weights.keys.filter { $0.lowercased().contains("embed") && $0.contains("weight") }
+        
+        // Try different possible key names for embedding weights
+        let possibleKeys = [
+            "embed_tokens.weight",
+            "model.embed_tokens.weight",
+            "transformer.wte.weight",
+            "talker.embed_tokens.weight"
+        ] + allEmbedKeys.sorted() // Add any found embed keys
+        
+        guard let embedKey = possibleKeys.first(where: { weights[$0] != nil }) else {
+            print("❌ Could not find embedding weights. Tried:")
+            possibleKeys.forEach { print("  - \($0)") }
+            print("\nAvailable keys with 'embed':")
+            allEmbedKeys.sorted().forEach { print("  - \($0)") }
+            throw MLXError.loadFailed("No embedding weights found in model")
+        }
+        
+        print("✓ Using embedding key: \(embedKey)")
+        let embedWeight = try getWeight(embedKey)
+        
         // Ensure indices are int32 for take operation
         let indices = inputIds.asType(.int32)
         // Take operation returns the dtype of embedWeight, but ensure it's float32
@@ -131,42 +178,42 @@ public actor MLXQwen3TTSModel {
         return embedded.asType(.float32)
     }
 
-    private func textProjection(_ hidden: MLXArray) -> MLXArray {
-        return linear(hidden, weight: weights["text_projection.weight"]!)
+    private func textProjection(_ hidden: MLXArray) throws -> MLXArray {
+        return try linear(hidden, weightKey: "text_projection.weight")
     }
 
     private func transformerLayer(_ hidden: MLXArray, layerIdx: Int) throws -> MLXArray {
         let prefix = "layers.\(layerIdx)"
 
         // Self-attention
-        let normHidden = rmsNorm(
+        let normHidden = try rmsNorm(
             hidden,
-            weight: weights["\(prefix).input_layernorm.weight"]!,
+            weightKey: "\(prefix).input_layernorm.weight",
             eps: config.rmsNormEps
         )
 
         let attnOutput = try attention(
             normHidden,
-            qWeight: weights["\(prefix).self_attn.q_proj.weight"]!,
-            kWeight: weights["\(prefix).self_attn.k_proj.weight"]!,
-            vWeight: weights["\(prefix).self_attn.v_proj.weight"]!,
-            oWeight: weights["\(prefix).self_attn.o_proj.weight"]!
+            qWeightKey: "\(prefix).self_attn.q_proj.weight",
+            kWeightKey: "\(prefix).self_attn.k_proj.weight",
+            vWeightKey: "\(prefix).self_attn.v_proj.weight",
+            oWeightKey: "\(prefix).self_attn.o_proj.weight"
         )
 
         var residual = hidden + attnOutput
 
         // MLP
-        let mlpNormHidden = rmsNorm(
+        let mlpNormHidden = try rmsNorm(
             residual,
-            weight: weights["\(prefix).post_attention_layernorm.weight"]!,
+            weightKey: "\(prefix).post_attention_layernorm.weight",
             eps: config.rmsNormEps
         )
 
-        let mlpOutput = mlp(
+        let mlpOutput = try mlp(
             mlpNormHidden,
-            gateWeight: weights["\(prefix).mlp.gate_proj.weight"]!,
-            upWeight: weights["\(prefix).mlp.up_proj.weight"]!,
-            downWeight: weights["\(prefix).mlp.down_proj.weight"]!
+            gateWeightKey: "\(prefix).mlp.gate_proj.weight",
+            upWeightKey: "\(prefix).mlp.up_proj.weight",
+            downWeightKey: "\(prefix).mlp.down_proj.weight"
         )
 
         residual = residual + mlpOutput
@@ -176,19 +223,19 @@ public actor MLXQwen3TTSModel {
 
     private func attention(
         _ hidden: MLXArray,
-        qWeight: MLXArray,
-        kWeight: MLXArray,
-        vWeight: MLXArray,
-        oWeight: MLXArray
+        qWeightKey: String,
+        kWeightKey: String,
+        vWeightKey: String,
+        oWeightKey: String
     ) throws -> MLXArray {
         let batchSize = hidden.shape[0]
         let seqLen = hidden.shape[1]
         let headDim = config.hiddenSize / config.numAttentionHeads
 
         // Project Q, K, V
-        let q = linear(hidden, weight: qWeight)
-        let k = linear(hidden, weight: kWeight)
-        let v = linear(hidden, weight: vWeight)
+        let q = try linear(hidden, weightKey: qWeightKey)
+        let k = try linear(hidden, weightKey: kWeightKey)
+        let v = try linear(hidden, weightKey: vWeightKey)
 
         // Reshape for multi-head
         let qHeads = q.reshaped(batchSize, seqLen, config.numAttentionHeads, headDim)
@@ -227,33 +274,35 @@ public actor MLXQwen3TTSModel {
             .reshaped(batchSize, seqLen, config.hiddenSize)
 
         // Output projection
-        return linear(output, weight: oWeight)
+        return try linear(output, weightKey: oWeightKey)
     }
 
     private func mlp(
         _ hidden: MLXArray,
-        gateWeight: MLXArray,
-        upWeight: MLXArray,
-        downWeight: MLXArray
-    ) -> MLXArray {
-        let gate = linear(hidden, weight: gateWeight)
-        let up = linear(hidden, weight: upWeight)
+        gateWeightKey: String,
+        upWeightKey: String,
+        downWeightKey: String
+    ) throws -> MLXArray {
+        let gate = try linear(hidden, weightKey: gateWeightKey)
+        let up = try linear(hidden, weightKey: upWeightKey)
         let activated = silu(gate) * up
-        return linear(activated, weight: downWeight)
+        return try linear(activated, weightKey: downWeightKey)
     }
 
     // MARK: - Helper Functions
 
-    private func linear(_ input: MLXArray, weight: MLXArray, bias: MLXArray? = nil, useTranspose: Bool = true) -> MLXArray {
+    private func linear(_ input: MLXArray, weightKey: String, biasKey: String? = nil, useTranspose: Bool = true) throws -> MLXArray {
+        let weight = try getWeight(weightKey)
         let weightToUse = useTranspose ? weight.T : weight
         var output = MLX.matmul(input, weightToUse)
-        if let bias = bias {
+        if let biasKey = biasKey, let bias = weights[biasKey] {
             output = output + bias
         }
         return output
     }
 
-    private func rmsNorm(_ input: MLXArray, weight: MLXArray, eps: Float) -> MLXArray {
+    private func rmsNorm(_ input: MLXArray, weightKey: String, eps: Float) throws -> MLXArray {
+        let weight = try getWeight(weightKey)
         let variance = MLX.mean(input * input, axis: -1, keepDims: true)
         let normalized = input * MLX.rsqrt(variance + eps)
         return normalized * weight
