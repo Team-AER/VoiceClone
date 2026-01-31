@@ -99,10 +99,29 @@ nonisolated func loadResidualVectorQuantizer(
     var actualCodebookDim = codebookDim
     
     for q in 0..<numQuantizers {
-        // Look for weight key like "quantizer.rvq.layers.0.codebook.weight"
-        let key = "\(prefix).layers.\(q).codebook.weight"
+        var codebook: MLXArray? = nil
         
-        if let codebook = weights[key] {
+        // Try multiple key formats:
+        // 1. Original format: "quantizer.rvq.layers.X.codebook.weight"
+        let originalKey = "\(prefix).layers.\(q).codebook.weight"
+        codebook = weights[originalKey]
+        
+        // 2. Qwen3-TTS format with split RVQ:
+        // - First quantizer: "quantizer.rvq_first.vq.layers.0._codebook.embedding_sum"
+        // - Rest quantizers: "quantizer.rvq_rest.vq.layers.X._codebook.embedding_sum"
+        if codebook == nil {
+            if q == 0 {
+                // Try first quantizer
+                let firstKey = "quantizer.rvq_first.vq.layers.0._codebook.embedding_sum"
+                codebook = weights[firstKey]
+            } else {
+                // Try rest quantizers (indexed from 0)
+                let restKey = "quantizer.rvq_rest.vq.layers.\(q - 1)._codebook.embedding_sum"
+                codebook = weights[restKey]
+            }
+        }
+        
+        if let codebook = codebook {
             // Check actual shape on first codebook
             if q == 0 {
                 actualCodebookDim = codebook.shape[1]
@@ -111,17 +130,19 @@ nonisolated func loadResidualVectorQuantizer(
                     print("   Config expects: \(codebookDim)")
                     print("   Actual weights: \(actualCodebookDim)")
                     print("   Codebook shape: \(codebook.shape)")
+                    print("   Using actual dimension: \(actualCodebookDim)")
                 }
             }
             codebooks.append(codebook)
         } else {
-            // Fallback: create random codebook (should not happen with proper weights)
-            print("⚠️ Warning: Codebook \(q) not found, using random initialization")
-            // Create placeholder codebook (zeros) since we don't have random in MLX 0.30.3
-            let randomCodebook = MLX.zeros([codebookSize, actualCodebookDim])
-            codebooks.append(randomCodebook)
+            // Fallback: create zero codebook (should not happen with proper weights)
+            print("⚠️ Warning: Codebook \(q) not found, using zero initialization")
+            let zeroCodebook = MLX.zeros([codebookSize, actualCodebookDim])
+            codebooks.append(zeroCodebook)
         }
     }
+    
+    print("✓ Loaded \(codebooks.count) codebooks with dimension \(actualCodebookDim)")
     
     return ResidualVectorQuantizer(
         numQuantizers: numQuantizers,

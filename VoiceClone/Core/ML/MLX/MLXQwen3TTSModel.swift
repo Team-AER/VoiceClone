@@ -54,20 +54,24 @@ public actor MLXQwen3TTSModel {
         let json = try JSONSerialization.jsonObject(with: configData) as? [String: Any] ?? [:]
         let loadedConfig = MLXQwen3TTSConfig(json: json)
 
-        // Load weights - use .safetensors format (MLX Swift API supports this)
+        // Load FP16 weights - use .safetensors format (MLX Swift API supports this)
         let weightsURL = modelPath.appendingPathComponent("talker_weights.safetensors")
-        print("📍 Loading talker weights from: \(weightsURL.path)")
+        print("📍 Loading talker FP16 weights from: \(weightsURL.path)")
 
-        // MLX Swift API can load .safetensors directly
+        // MLX Swift API can load .safetensors directly (no dequantization needed for FP16)
         let loadedWeights = try MLX.loadArrays(url: weightsURL)
 
         self.config = loadedConfig
         self.weights = loadedWeights
 
-        print("✓ Loaded MLX model from \(modelPath.lastPathComponent)")
+        print("✓ Loaded MLX FP16 model from \(modelPath.lastPathComponent)")
         print("  Layers: \(loadedConfig.numHiddenLayers)")
         print("  Hidden size: \(loadedConfig.hiddenSize)")
         print("  Parameters: \(loadedWeights.count)")
+        
+        // Print first few weight keys for debugging
+        let weightKeys = loadedWeights.keys.sorted().prefix(5)
+        print("  Sample weights: \(weightKeys.joined(separator: ", "))")
     }
 
     /// Generate audio codes from text tokens

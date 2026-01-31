@@ -84,17 +84,17 @@ Models are loaded from filesystem paths with a fallback strategy:
 1. Documents directory (for production downloaded models)
 2. App bundle (for development on physical devices)
 3. Development paths (for running from Xcode):
- - `VoiceClone/Resources/MLXModels/Qwen3TTS_INT4/`
- - `models/MLXModels/Qwen3TTS_INT4/` (talker model)
- - `models/MLXModels/Qwen3TTS_Decoder/` (decoder model)
+   - `VoiceClone/Resources/MLXModels/Qwen3TTS_FP16/` (talker model)
+   - `models/MLXModels/Qwen3TTS_FP16/` (talker model fallback)
+   - `models/MLXModels/Qwen3TTS_Decoder/` (decoder model)
 
-**Model Format**: MLX Swift API requires `.safetensors` format. Use `scripts/convert_npz_to_safetensors.py` to convert `.npz` files to `.safetensors`.
+**Model Format**: MLX Swift API uses `.safetensors` format. Models are converted using `scripts/download_and_convert_fp16.py` which follows Apple's official MLX conversion pattern.
 
-**File Naming Convention** (to prevent Xcode build conflicts):
-- Talker model files: `talker_config.json`, `talker_weights.safetensors` (converted from .npz)
-- Decoder model files: `decoder_config.json`, `decoder_weights.safetensors` (converted from .npz)
+**File Naming Convention**:
+- Talker model files: `talker_config.json`, `talker_weights.safetensors` (FP16, 3.6GB, 404 tensors)
+- Decoder model files: `decoder_config.json`, `decoder_weights.safetensors` (FP16, 436MB)
 
-**Critical Development Requirement**: Because MLX requires physical devices (Metal hardware) and physical devices cannot access the Mac's filesystem, models MUST be present in `VoiceClone/Resources/MLXModels/` for development testing. The original filenames were causing "Multiple commands produce" errors in Xcode, so they have been renamed to unique names as listed above.
+**Critical Development Requirement**: Because MLX requires physical devices (Metal hardware) and physical devices cannot access the Mac's filesystem, models MUST be present in `VoiceClone/Resources/MLXModels/` for development testing.
 
 **Production**: Models are downloaded via On-Demand Resources (ODR) and stored in Documents directory, NOT bundled in the IPA to avoid bloating the app size.
 
@@ -206,10 +206,10 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 ## Known Limitations
 
 1. **No Simulator Support**: MLX requires Metal, which isn't fully supported on simulator
-2. **Large Model Files**: 2.6GB total, must be downloaded separately (not in git repo)
+2. **Large Model Files**: 4GB total (FP16 models), must be downloaded separately (not in git repo)
 3. **Voice Cloning**: Currently falls back to voice design mode (reference audio embedding extraction not implemented)
-4. **Memory Usage**: ~1.5GB during inference on device
-5. **Model Format**: MLX Swift only supports `.safetensors` and `.npy` (single array). `.npz` is NOT supported. Use `scripts/convert_npz_to_safetensors.py` to convert models.
+4. **Memory Usage**: ~3GB during inference on device (FP16 models)
+5. **Physical Device Required**: MLX requires Metal hardware, iOS Simulator will not work
 
 ## Dependencies
 
@@ -218,26 +218,49 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 - **Core Data**: Voice library persistence
 - **AVFoundation**: Audio playback and recording
 
+## Model Conversion
+
+Models are converted from HuggingFace to MLX format using Apple's official conversion pattern:
+
+```bash
+cd scripts
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install git+https://github.com/QwenLM/Qwen3-TTS.git
+
+# Convert Qwen3-TTS to FP16 MLX format
+python download_and_convert_fp16.py \
+    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
+    --output ./mlx_models_fp16 \
+    --talker-only
+```
+
+The conversion follows Apple's MLX standard:
+1. Load model with `from_pretrained()`
+2. Extract all weights via `state_dict()`
+3. Convert PyTorch tensors to numpy FP16
+4. Save as `.safetensors`
+
+**Result**: 404 tensors, 3.6GB FP16 model (no quantization)
+
+See `scripts/FINAL_SOLUTION.md` for details on why this approach is superior to quantized models.
+
 ## Production Deployment
 
-**Using On-Demand Resources (ODR)** - Currently Implemented:
-- Models are tagged as ODR assets in Xcode
+**Using On-Demand Resources (ODR)** - Planned:
+- Models will be tagged as ODR assets in Xcode
 - Downloaded from Apple's CDN after initial install
 - Managed by `ODRManager` actor
 - UI prompts user to download on first launch
-- Handles iOS purging gracefully
 
-**Next Steps:**
-1. Configure ODR tags in Xcode (see `docs/ODR_IMPLEMENTATION_STATUS.md`)
-2. Split talker model to comply with 2GB per-tag limit
-3. Test via TestFlight on physical devices
-4. Monitor download metrics in App Store Connect
+**Challenges:**
+- Apple has 2GB per-tag limit, talker model is 3.6GB
+- Need to split model or use alternative delivery method
 
-**Alternative: Self-Hosted Downloads** (if ODR fails):
+**Alternative: Self-Hosted Downloads**:
 1. Host models on server (e.g., HuggingFace, S3)
 2. Download to Documents directory on first launch
 3. Verify checksums after download
-4. Requires separate hosting infrastructure
 
 ## Documentation References
 

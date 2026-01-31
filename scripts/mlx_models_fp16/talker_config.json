@@ -1,4 +1,5 @@
 {
+  "model_type": "qwen3_tts_talker",
   "hidden_size": 2048,
   "num_hidden_layers": 28,
   "num_attention_heads": 16,
@@ -7,6 +8,6 @@
   "vocab_size": 3072,
   "rms_norm_eps": 1e-06,
   "num_code_groups": 16,
-  "audio_vocab_size": 2048,
-  "model_type": "qwen3_tts"
+  "codebook_size": 192,
+  "audio_vocab_size": 192
 }

@@ -341,11 +341,11 @@ final class MLXTTSService: ObservableObject {
         let modelName: String
         switch capability {
         case .voiceDesign:
-            modelName = "Qwen3TTS_INT4"
+            modelName = "Qwen3TTS_FP16"
         case .customVoice:
-            modelName = "Qwen3TTS_INT4"  // Same model for now
+            modelName = "Qwen3TTS_FP16"  // Same model for now
         case .voiceClone:
-            modelName = "Qwen3TTS_INT4"  // Same model for now
+            modelName = "Qwen3TTS_FP16"  // Same model for now
         }
 
         // 1) Prefer Documents directory (downloaded models)

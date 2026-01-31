@@ -252,32 +252,23 @@ public actor MLXSpeechDecoder {
     private func preTransformer(_ hidden: MLXArray) -> MLXArray {
         var x = hidden
         
-        print("🔍 PreTransformer input shape: \(x.shape)")
-        
         // Input projection
         if let inputProj = weights["pre_transformer.input_proj.weight"] {
-            print("🔍 Input projection weight shape: \(inputProj.shape)")
-            print("   Expected: [hidden_size(\(config.hiddenSize)), rvq_output(\(actualRvqOutputDim))]")
-            
-            // Check if dimensions match
-            let expectedInputDim = inputProj.shape[1]  // For PyTorch format (out, in)
+            // Validate dimensions (FP16 models should have correct dimensions)
+            let weightInDim = inputProj.shape[1]
             let actualInputDim = x.shape[x.ndim - 1]
             
-            if expectedInputDim != actualInputDim {
-                print("⚠️ Dimension mismatch in input projection!")
-                print("   Weight expects input: \(expectedInputDim)")
-                print("   Actual input: \(actualInputDim)")
-                
-                // Try transposing the weight to fix the issue
-                let transposedWeight = inputProj.T
-                print("   Trying transposed weight shape: \(transposedWeight.shape)")
-                x = linear(x, weight: transposedWeight, useTranspose: false)
-            } else {
-                x = linear(x, weight: inputProj)
+            guard weightInDim == actualInputDim else {
+                print("❌ Dimension mismatch in input projection!")
+                print("   Weight expects: \(weightInDim) dims")
+                print("   RVQ outputs: \(actualInputDim) dims")
+                print("   This indicates incorrect model conversion or architecture mismatch")
+                fatalError("Dimension mismatch in pre-transformer input projection")
             }
+            
+            // Apply projection with transpose (PyTorch format -> MLX)
+            x = linear(x, weight: inputProj, useTranspose: true)
         }
-        
-        print("🔍 After input projection: \(x.shape)")
         
         // Transformer layers
         for layerIdx in 0..<config.numHiddenLayers {
@@ -286,7 +277,7 @@ public actor MLXSpeechDecoder {
         
         // Output projection
         if let outputProj = weights["pre_transformer.output_proj.weight"] {
-            x = linear(x, weight: outputProj)
+            x = linear(x, weight: outputProj, useTranspose: true)
         }
         
         return x
