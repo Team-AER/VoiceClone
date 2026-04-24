@@ -274,66 +274,52 @@ final class MLXTTSService: ObservableObject {
     // MARK: - Helper Methods
 
     private func getDecoderPath() -> URL? {
-        // 1) Try Documents directory first
-        if let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let docPath = documentsDir
-                .appendingPathComponent("MLXModels", isDirectory: true)
-                .appendingPathComponent("Qwen3TTS_Decoder", isDirectory: true)
+        let modelName = "Qwen3TTS_Decoder"
 
-            let configURL = docPath.appendingPathComponent("decoder_config.json")
-            let weightsURL = docPath.appendingPathComponent("decoder_weights.safetensors")
-            if FileManager.default.fileExists(atPath: configURL.path) &&
-                FileManager.default.fileExists(atPath: weightsURL.path) {
-                print("✓ Using decoder from Documents: \(docPath.path)")
-                return docPath
-            }
-        }
-        
-        // 2) Try bundle resources
-        guard let resourcesRoot = Bundle.main.resourceURL else {
-            return nil
+        // 1) Application Support (macOS downloaded models) / Documents (iOS)
+        let managedDir = ModelDownloadManager.modelsDirectory
+            .appendingPathComponent(modelName, isDirectory: true)
+        if fileExists(in: managedDir, config: "decoder_config.json", weights: "decoder_weights.safetensors") {
+            print("✓ Using decoder from managed dir: \(managedDir.path)")
+            return managedDir
         }
 
-        // First check bundle root (files may be flattened during copy)
-        // Use Bundle.main.url(forResource:) for better iOS bundle handling
-        if let configURL = Bundle.main.url(forResource: "decoder_config", withExtension: "json"),
-           let weightsURL = Bundle.main.url(forResource: "decoder_weights", withExtension: "safetensors") {
-            // Return the directory containing these files (bundle root)
+        // 2) Bundle resources
+        if let configURL = Bundle.main.url(forResource: "decoder_config", withExtension: "json") {
             let bundleRoot = configURL.deletingLastPathComponent()
-            print("✓ Using decoder from Bundle root: \(bundleRoot.path)")
-            return bundleRoot
-        }
-
-        let candidateSubpaths = [
-            "Resources/MLXModels/Qwen3TTS_Decoder",
-            "MLXModels/Qwen3TTS_Decoder",
-            "Resources/Qwen3TTS_Decoder",
-            "Qwen3TTS_Decoder"
-        ]
-
-        for subpath in candidateSubpaths {
-            let candidateDir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
-            let configURL = candidateDir.appendingPathComponent("decoder_config.json")
-            let weightsURL = candidateDir.appendingPathComponent("decoder_weights.safetensors")
-            if FileManager.default.fileExists(atPath: configURL.path) &&
-                FileManager.default.fileExists(atPath: weightsURL.path) {
-                print("✓ Using decoder from Bundle: \(candidateDir.path)")
-                return candidateDir
+            if fileExists(in: bundleRoot, config: "decoder_config.json", weights: "decoder_weights.safetensors") {
+                print("✓ Using decoder from Bundle root: \(bundleRoot.path)")
+                return bundleRoot
             }
         }
 
-        // 3) Check models directory (for development)
-        let modelsDirPath = "/Users/prakhar/Developer/AER/VoiceClone/models/MLXModels/Qwen3TTS_Decoder"
-        let modelsURL = URL(fileURLWithPath: modelsDirPath)
-        let configURL = modelsURL.appendingPathComponent("decoder_config.json")
-        let weightsURL = modelsURL.appendingPathComponent("decoder_weights.safetensors")
-        if FileManager.default.fileExists(atPath: configURL.path) &&
-            FileManager.default.fileExists(atPath: weightsURL.path) {
-            print("✓ Using decoder from models directory: \(modelsDirPath)")
-            return modelsURL
+        guard let resourcesRoot = Bundle.main.resourceURL else { return nil }
+
+        for subpath in ["Resources/MLXModels/\(modelName)", "MLXModels/\(modelName)", modelName] {
+            let dir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
+            if fileExists(in: dir, config: "decoder_config.json", weights: "decoder_weights.safetensors") {
+                print("✓ Using decoder from Bundle subpath: \(dir.path)")
+                return dir
+            }
         }
-        
+
+        // 3) Developer override via environment variable (DEBUG only)
+        #if DEBUG
+        if let envBase = ProcessInfo.processInfo.environment["VOICECLONE_MODELS_DIR"] {
+            let dir = URL(fileURLWithPath: envBase).appendingPathComponent(modelName)
+            if fileExists(in: dir, config: "decoder_config.json", weights: "decoder_weights.safetensors") {
+                print("✓ Using decoder from VOICECLONE_MODELS_DIR: \(dir.path)")
+                return dir
+            }
+        }
+        #endif
+
         return nil
+    }
+
+    private func fileExists(in dir: URL, config: String, weights: String) -> Bool {
+        FileManager.default.fileExists(atPath: dir.appendingPathComponent(config).path) &&
+        FileManager.default.fileExists(atPath: dir.appendingPathComponent(weights).path)
     }
 
     private func getModelPath(for capability: TTSCapability) -> URL? {
@@ -348,72 +334,44 @@ final class MLXTTSService: ObservableObject {
             modelName = "Qwen3TTS_FP16"  // Same model for now
         }
 
-        // 1) Prefer Documents directory (downloaded models)
-        if let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let docPath = documentsDir
-                .appendingPathComponent("MLXModels", isDirectory: true)
-                .appendingPathComponent(modelName, isDirectory: true)
-
-            let configURL = docPath.appendingPathComponent("talker_config.json")
-            let weightsURL = docPath.appendingPathComponent("talker_weights.safetensors")
-            if FileManager.default.fileExists(atPath: configURL.path) &&
-                FileManager.default.fileExists(atPath: weightsURL.path) {
-                print("✓ Using MLX model from Documents: \(docPath.path)")
-                return docPath
-            }
+        // 1) Application Support (macOS) / Documents (iOS) — managed by ModelDownloadManager
+        let managedDir = ModelDownloadManager.modelsDirectory
+            .appendingPathComponent(modelName, isDirectory: true)
+        if fileExists(in: managedDir, config: "talker_config.json", weights: "talker_weights.safetensors") {
+            print("✓ Using talker from managed dir: \(managedDir.path)")
+            return managedDir
         }
 
-        // 2) Search common bundle locations. We validate that both config.json and weights.safetensors exist in the candidate directory to avoid partial matches
-        guard let resourcesRoot = Bundle.main.resourceURL else {
-            return nil
-        }
-
-        // First check bundle root (files may be flattened during copy)
-        // Use Bundle.main.url(forResource:) for better iOS bundle handling
-        if let configURL = Bundle.main.url(forResource: "talker_config", withExtension: "json"),
-           let weightsURL = Bundle.main.url(forResource: "talker_weights", withExtension: "safetensors") {
-            // Return the directory containing these files (bundle root)
+        // 2) Bundle resources (iOS development builds)
+        if let configURL = Bundle.main.url(forResource: "talker_config", withExtension: "json") {
             let bundleRoot = configURL.deletingLastPathComponent()
-            print("✓ Using MLX model from Bundle root: \(bundleRoot.path)")
-            return bundleRoot
-        }
-
-        let candidateSubpaths = [
-            "Resources/MLXModels/\(modelName)",
-            "MLXModels/\(modelName)",
-            "Resources/\(modelName)",
-            "\(modelName)"
-        ]
-
-        for subpath in candidateSubpaths {
-            let candidateDir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
-            let configURL = candidateDir.appendingPathComponent("talker_config.json")
-            let weightsURL = candidateDir.appendingPathComponent("talker_weights.safetensors")
-            if FileManager.default.fileExists(atPath: configURL.path) &&
-                FileManager.default.fileExists(atPath: weightsURL.path) {
-                print("✓ Using MLX model from Bundle: \(candidateDir.path)")
-                return candidateDir
+            if fileExists(in: bundleRoot, config: "talker_config.json", weights: "talker_weights.safetensors") {
+                print("✓ Using talker from Bundle root: \(bundleRoot.path)")
+                return bundleRoot
             }
         }
 
-        // 3) Check development paths (for running from Xcode)
-        let devPaths = [
-            "/Users/prakhar/Developer/AER/VoiceClone/VoiceClone/Resources/MLXModels/\(modelName)",
-            "/Users/prakhar/Developer/AER/VoiceClone/models/MLXModels/\(modelName)"
-        ]
-
-        for devPath in devPaths {
-            let devURL = URL(fileURLWithPath: devPath)
-            let configURL = devURL.appendingPathComponent("talker_config.json")
-            let weightsURL = devURL.appendingPathComponent("talker_weights.safetensors")
-            if FileManager.default.fileExists(atPath: configURL.path) &&
-                FileManager.default.fileExists(atPath: weightsURL.path) {
-                print("✓ Using MLX model from dev path: \(devPath)")
-                return devURL
+        if let resourcesRoot = Bundle.main.resourceURL {
+            for subpath in ["Resources/MLXModels/\(modelName)", "MLXModels/\(modelName)", modelName] {
+                let dir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
+                if fileExists(in: dir, config: "talker_config.json", weights: "talker_weights.safetensors") {
+                    print("✓ Using talker from Bundle subpath: \(dir.path)")
+                    return dir
+                }
             }
         }
 
-        // Not found
+        // 3) Developer override via environment variable (DEBUG only)
+        #if DEBUG
+        if let envBase = ProcessInfo.processInfo.environment["VOICECLONE_MODELS_DIR"] {
+            let dir = URL(fileURLWithPath: envBase).appendingPathComponent(modelName)
+            if fileExists(in: dir, config: "talker_config.json", weights: "talker_weights.safetensors") {
+                print("✓ Using talker from VOICECLONE_MODELS_DIR: \(dir.path)")
+                return dir
+            }
+        }
+        #endif
+
         return nil
     }
 }

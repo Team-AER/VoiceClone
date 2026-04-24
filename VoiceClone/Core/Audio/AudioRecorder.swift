@@ -21,19 +21,7 @@ final class AudioRecorder: ObservableObject {
     var minimumDuration: TimeInterval { 3.0 }
 
     func startRecording() async throws -> URL {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default)
-        try session.setActive(true)
-
-        let permitted = await withCheckedContinuation { continuation in
-            session.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
-            }
-        }
-
-        guard permitted else {
-            throw RecordingError.permissionDenied
-        }
+        try await requestMicrophonePermission()
 
         let url = tempRecordingURL()
 
@@ -45,6 +33,12 @@ final class AudioRecorder: ObservableObject {
             AVLinearPCMIsFloatKey: false,
             AVLinearPCMIsBigEndianKey: false
         ]
+
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .default)
+        try session.setActive(true)
+        #endif
 
         audioRecorder = try AVAudioRecorder(url: url, settings: settings)
         audioRecorder?.isMeteringEnabled = true
@@ -70,6 +64,10 @@ final class AudioRecorder: ObservableObject {
         isRecording = false
         stopLevelMetering()
 
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false)
+        #endif
+
         guard duration >= minimumDuration else {
             try? fileManager.removeItem(at: url)
             throw RecordingError.tooShort(minimum: minimumDuration)
@@ -87,6 +85,19 @@ final class AudioRecorder: ObservableObject {
 
         isRecording = false
         stopLevelMetering()
+
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false)
+        #endif
+    }
+
+    // MARK: - Private
+
+    private func requestMicrophonePermission() async throws {
+        let granted = await AVCaptureDevice.requestAccess(for: .audio)
+        guard granted else {
+            throw RecordingError.permissionDenied
+        }
     }
 
     private func tempRecordingURL() -> URL {
@@ -97,7 +108,7 @@ final class AudioRecorder: ObservableObject {
 
     private func startLevelMetering() {
         levelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            self?.updateLevels()
+            Task { @MainActor [weak self] in self?.updateLevels() }
         }
     }
 

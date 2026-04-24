@@ -5,7 +5,6 @@
 
 import AVFoundation
 import Foundation
-import UIKit
 
 /// Manages audio playback with streaming support
 @MainActor
@@ -19,7 +18,7 @@ final class AudioEngine: ObservableObject {
     private let playerNode = AVAudioPlayerNode()
     private let format: AVAudioFormat
 
-    private var displayLink: CADisplayLink?
+    private var ticker: PlaybackTimeTicker?
     private var scheduledBuffers: Int = 0
     private var completedBuffers: Int = 0
 
@@ -40,7 +39,7 @@ final class AudioEngine: ObservableObject {
     }
 
     func playStream(_ stream: AsyncThrowingStream<AudioChunk, Error>) async throws {
-        try configureAudioSession()
+        configureAudioSessionIfNeeded()
         try engine.start()
         playerNode.play()
         isPlaying = true
@@ -70,7 +69,7 @@ final class AudioEngine: ObservableObject {
     func play(audio: Data, format: AudioFormat) async throws {
         let buffer = try decodeAudio(data: audio, format: format)
 
-        try configureAudioSession()
+        configureAudioSessionIfNeeded()
         try engine.start()
         playerNode.play()
         isPlaying = true
@@ -109,14 +108,10 @@ final class AudioEngine: ObservableObject {
     }
 
     func seek(to time: TimeInterval, totalDuration: TimeInterval, chunks: [AudioChunk]) async throws {
-        guard time >= 0, time <= totalDuration else {
-            return
-        }
+        guard time >= 0, time <= totalDuration else { return }
 
-        // Stop current playback
         stop()
 
-        // Calculate which chunks to play from seek position
         var elapsed: TimeInterval = 0
         var startChunkIndex = 0
         var offsetInChunk = 0
@@ -131,13 +126,10 @@ final class AudioEngine: ObservableObject {
             elapsed += chunkDuration
         }
 
-        // Create stream from remaining chunks
         let remainingStream = AsyncThrowingStream<AudioChunk, Error> { continuation in
             Task {
                 for index in startChunkIndex..<chunks.count {
                     var chunk = chunks[index]
-
-                    // Skip samples in first chunk if needed
                     if index == startChunkIndex && offsetInChunk > 0 {
                         let remainingSamples = Array(chunk.samples[offsetInChunk...])
                         chunk = AudioChunk(
@@ -146,30 +138,28 @@ final class AudioEngine: ObservableObject {
                             timestamp: chunk.timestamp
                         )
                     }
-
                     continuation.yield(chunk)
                 }
                 continuation.finish()
             }
         }
 
-        // Update current time to seek position
         currentTime = time
-
-        // Play from new position
         try await playStream(remainingStream)
     }
 
     // MARK: - Private
 
-    private func configureAudioSession() throws {
+    private func configureAudioSessionIfNeeded() {
+        #if os(iOS)
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-        try session.setActive(true)
+        try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try? session.setActive(true)
+        #endif
+        // macOS: AVAudioEngine handles device routing automatically; no session setup needed.
     }
 
     private func createBuffer(from chunk: AudioChunk) throws -> AVAudioPCMBuffer {
-        // Validate sample rate matches
         guard abs(Double(chunk.sampleRate) - format.sampleRate) < 0.1 else {
             throw AudioError.sampleRateMismatch(
                 expected: format.sampleRate,
@@ -211,21 +201,23 @@ final class AudioEngine: ObservableObject {
     }
 
     private func startTimeTracking() {
-        displayLink = CADisplayLink(target: self, selector: #selector(updateTime))
-        displayLink?.add(to: .main, forMode: .common)
+        let t = PlaybackTimeTicker { [weak self] in
+            self?.updateTime()
+        }
+        t.start()
+        ticker = t
     }
 
     private func stopTimeTracking() {
-        displayLink?.invalidate()
-        displayLink = nil
+        ticker?.stop()
+        ticker = nil
     }
 
-    @objc private func updateTime() {
+    private func updateTime() {
         guard let nodeTime = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
             return
         }
-
         currentTime = Double(playerTime.sampleTime) / playerTime.sampleRate
     }
 
