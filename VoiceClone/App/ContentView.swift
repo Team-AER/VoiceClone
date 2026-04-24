@@ -12,11 +12,13 @@ struct ContentView: View {
     @EnvironmentObject var container: DIContainer
     @State private var selectedTab: Tab = .speak
 
-    enum Tab: String, CaseIterable {
+    enum Tab: String, CaseIterable, Identifiable {
         case speak = "Speak"
         case design = "Design"
         case clone = "Clone"
         case library = "Library"
+
+        var id: Self { self }
 
         var icon: String {
             switch self {
@@ -29,8 +31,20 @@ struct ContentView: View {
     }
 
     var body: some View {
+        #if os(macOS)
+        NavigationSplitView {
+            List(Tab.allCases, selection: $selectedTab) { tab in
+                Label(tab.rawValue, systemImage: tab.icon)
+                    .tag(tab)
+            }
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
+            .navigationTitle("VoiceClone")
+        } detail: {
+            tabContent(for: selectedTab)
+        }
+        #else
         TabView(selection: $selectedTab) {
-            ForEach(Tab.allCases, id: \.self) { tab in
+            ForEach(Tab.allCases) { tab in
                 tabContent(for: tab)
                     .tabItem {
                         Label(tab.rawValue, systemImage: tab.icon)
@@ -38,6 +52,7 @@ struct ContentView: View {
                     .tag(tab)
             }
         }
+        #endif
     }
 
     @ViewBuilder

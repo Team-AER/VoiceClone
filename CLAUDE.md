@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VoiceClone is an iOS app for on-device text-to-speech synthesis with voice cloning and voice design capabilities. It uses MLX (Apple's machine learning framework) to run Qwen3-TTS models locally on iOS devices via Metal acceleration.
+VoiceClone is a **macOS-first** (also iOS) app for on-device text-to-speech synthesis with voice cloning and voice design capabilities. It uses MLX (Apple's machine learning framework) to run Qwen3-TTS models locally via Metal acceleration.
 
-**Platform**: iOS 17.0+
+**Platform**: macOS 26+ (primary), iOS 26+ (secondary — maintained via `#if os(...)` conditionals)
 **Language**: Swift 6.0 (strict concurrency enabled)
 **ML Framework**: MLX via mlx-swift package
 **Architecture**: MVVM with SwiftUI
@@ -16,31 +16,45 @@ VoiceClone is an iOS app for on-device text-to-speech synthesis with voice cloni
 ### Building the Project
 
 ```bash
-# Build for physical device (REQUIRED - MLX needs Metal hardware)
+# Build for macOS (primary target — runs directly, no device needed)
+xcodebuild build \
+  -project VoiceClone.xcodeproj \
+  -scheme VoiceClone \
+  -destination 'platform=macOS,arch=arm64'
+
+# Build for physical iOS device (MLX needs Metal hardware)
 xcodebuild build \
   -project VoiceClone.xcodeproj \
   -scheme VoiceClone \
   -destination 'generic/platform=iOS'
-
-# Or in Xcode: Cmd+B (with physical device selected)
 ```
 
-**IMPORTANT**: This project does NOT work on iOS Simulator. MLX requires Metal hardware features only available on physical devices. Simulator builds will fail with Metal linker errors.
+**IMPORTANT**: iOS Simulator does NOT work — MLX requires Metal hardware. macOS builds run directly on your Mac (no device needed).
+
+### Model Setup for Development (macOS)
+
+Set `VOICECLONE_MODELS_DIR` in your Xcode scheme's environment variables to the directory containing `Qwen3TTS_FP16/` and `Qwen3TTS_Decoder/` subdirectories:
+
+```
+VOICECLONE_MODELS_DIR=/path/to/models/MLXModels
+```
+
+In production the app downloads models on first launch to `~/Library/Application Support/VoiceClone/MLXModels/`.
 
 ### Running Tests
 
 ```bash
-# Run all tests (requires physical iOS device)
+# Run tests on macOS (preferred — no device needed)
 xcodebuild test \
   -project VoiceClone.xcodeproj \
   -scheme VoiceClone \
-  -destination 'platform=iOS,name=Your Device Name'
+  -destination 'platform=macOS,arch=arm64' \
+  -only-testing:VoiceCloneTests
 
-# Run specific test suite
+# Run tests on physical iOS device
 xcodebuild test \
   -project VoiceClone.xcodeproj \
   -scheme VoiceClone \
-  -only-testing:VoiceCloneTests/MLXTTSServiceTests \
   -destination 'platform=iOS,name=Your Device Name'
 ```
 
@@ -79,14 +93,17 @@ xcodebuild test \
 
 ### Model Loading Architecture
 
-Models are loaded from filesystem paths with a fallback strategy:
+Models are loaded from filesystem paths with a platform-aware fallback strategy (see `MLXTTSService.swift`):
 
-1. Documents directory (for production downloaded models)
-2. App bundle (for development on physical devices)
-3. Development paths (for running from Xcode):
-   - `VoiceClone/Resources/MLXModels/Qwen3TTS_FP16/` (talker model)
-   - `models/MLXModels/Qwen3TTS_FP16/` (talker model fallback)
-   - `models/MLXModels/Qwen3TTS_Decoder/` (decoder model)
+**macOS path priority:**
+1. `~/Library/Application Support/VoiceClone/MLXModels/` — managed by `ModelDownloadManager` (production)
+2. App bundle resources (development only)
+3. `$VOICECLONE_MODELS_DIR/<ModelName>/` — DEBUG env var override for Xcode development
+
+**iOS path priority:**
+1. Documents directory — managed by `ModelDownloadManager`
+2. App bundle resources (physical device development builds)
+3. `$VOICECLONE_MODELS_DIR/<ModelName>/` — DEBUG env var override
 
 **Model Format**: MLX Swift API uses `.safetensors` format. Models are converted using `scripts/download_and_convert_fp16.py` which follows Apple's official MLX conversion pattern.
 
@@ -94,29 +111,7 @@ Models are loaded from filesystem paths with a fallback strategy:
 - Talker model files: `talker_config.json`, `talker_weights.safetensors` (FP16, 3.6GB, 404 tensors)
 - Decoder model files: `decoder_config.json`, `decoder_weights.safetensors` (FP16, 436MB)
 
-**Critical Development Requirement**: Because MLX requires physical devices (Metal hardware) and physical devices cannot access the Mac's filesystem, models MUST be present in `VoiceClone/Resources/MLXModels/` for development testing.
-
-**Production**: Models are downloaded via On-Demand Resources (ODR) and stored in Documents directory, NOT bundled in the IPA to avoid bloating the app size.
-
-### On-Demand Resources (ODR)
-
-The app uses Apple's On-Demand Resources for production distribution:
-
-**Components:**
-- `ODRManager`: Actor managing download state and requests
-- `ModelDownloadView`: UI for downloading models on first launch
-- Tags: `tts_model_talker` (2.2GB), `tts_model_decoder` (440MB)
-
-**Path Resolution Priority:**
-1. ODR resources (production - downloaded on demand)
-2. Documents directory (manual download fallback)
-3. Bundle resources (legacy - not used in production)
-4. Development paths (Xcode development only)
-
-**Important Notes:**
-- Apple has a 2GB per-tag limit - talker model needs to be split across multiple tags
-- ODR assets may be purged by iOS when storage is low - app detects and re-downloads
-- See `docs/ODR_IMPLEMENTATION_PLAN.md` for setup details
+**Production (both platforms)**: `ModelDownloadManager` downloads models on first launch and caches them. No ODR is used. The download gate UI (`ModelDownloadView`) blocks the main UI until models are present.
 - See `docs/ODR_IMPLEMENTATION_STATUS.md` for current progress
 
 ## Swift 6 Concurrency Patterns
