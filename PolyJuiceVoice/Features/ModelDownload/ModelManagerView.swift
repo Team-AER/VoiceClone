@@ -48,15 +48,21 @@ struct ModelManagerView: View {
 
     var body: some View {
         NavigationStack {
-            TabView(selection: $selectedTab) {
-                ForEach(TTSCapability.allCases, id: \.self) { capability in
-                    capabilityPane(capability)
-                        .tabItem {
-                            Label(capability.displayName,
-                                  systemImage: tabIcon(for: capability))
-                        }
-                        .tag(capability)
-                }
+            VStack(spacing: 0) {
+                capabilityPicker
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
+
+                // Only the active pane is in the view tree. We used to use
+                // `TabView` with `.tabItem`, but macOS's NSTabView eagerly
+                // mounts every pane — so all three `GlassEffectContainer`s,
+                // their `LazyVStack`s, and ~60 material pills were alive at
+                // once. The container can only batch glass surfaces within
+                // a single pane, so triple-mounting tripled the GPU cost
+                // and the cross-pane layout measurement was producing the
+                // `_NSDetectedLayoutRecursion` AppKit warning.
+                capabilityPane(selectedTab)
             }
             .navigationTitle("Models")
             #if os(iOS)
@@ -89,21 +95,41 @@ struct ModelManagerView: View {
 
     // MARK: - Tab content
 
+    private var capabilityPicker: some View {
+        Picker("Capability", selection: $selectedTab) {
+            ForEach(TTSCapability.allCases, id: \.self) { capability in
+                Label(capability.displayName,
+                      systemImage: tabIcon(for: capability))
+                    .tag(capability)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
     @ViewBuilder
     private func capabilityPane(_ capability: TTSCapability) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                introCard(for: capability)
+            // Without `GlassEffectContainer`, every `.glassEffect` card
+            // samples and blurs its own background patch each frame. With
+            // 4–7 cards on screen at once that pegged the GPU and made the
+            // scroll view unusable. The container batches the glass
+            // surfaces into a shared sampling region — same look, a fraction
+            // of the per-frame cost. Same pattern as Speak / Clone / Design.
+            GlassEffectContainer(spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    introCard(for: capability)
 
-                ForEach(variantBuckets(for: capability), id: \.id) { bucket in
-                    variantCard(capability: capability, bucket: bucket)
+                    ForEach(variantBuckets(for: capability), id: \.id) { bucket in
+                        variantCard(capability: capability, bucket: bucket)
+                    }
+
+                    storageFooter
                 }
-
-                storageFooter
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 14)
-            .padding(.bottom, 24)
         }
         .scrollContentBackground(.hidden)
     }
@@ -209,9 +235,9 @@ struct ModelManagerView: View {
     private func capabilityBlurb(_ capability: TTSCapability) -> String {
         switch capability {
         case .customVoice:
-            return "Built-in preset speakers (Vivian, Ryan, …). Base variants also cover voice cloning, so picking one here can satisfy two tabs at once."
+            return "Built-in preset speakers (Vivian, Ryan, …). Smallest disk footprint when you only want presets — these don't include voice cloning. If you also want cloning, install a Base variant from the Voice Cloning tab and it'll cover both."
         case .voiceClone:
-            return "Clone any voice from a 3-second reference clip. 1.7B captures more nuance; 0.6B is faster and uses ~half the disk."
+            return "Clone any voice from a 3-second reference clip. 1.7B captures more nuance; 0.6B is faster and uses ~half the disk. These Base variants also cover Preset Voices, so installing one here satisfies both tabs."
         case .voiceDesign:
             return "Generate a brand-new voice from a free-form description. Only published at 1.7B."
         }
@@ -222,7 +248,7 @@ struct ModelManagerView: View {
     ///  1.7B before 0.6B; Base before CustomVoice (since Base is the more
     ///  capable model in the customVoice tab).
     private func variantBuckets(for capability: TTSCapability) -> [VariantBucket] {
-        let snaps = capability.compatibleSnapshots
+        let snaps = capability.hostedSnapshots
         var buckets: [VariantBucket] = []
         for family in [ModelFamily.b17, .b06] {
             for snapCap in [SnapshotCapability.base, .customVoice, .voiceDesign] {

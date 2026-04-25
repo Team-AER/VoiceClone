@@ -86,7 +86,13 @@ struct VoiceLibraryView: View {
                 Button {
                     viewModel.setSortOption(option)
                 } label: {
-                    Label(option.rawValue, systemImage: viewModel.sortOption == option ? "checkmark" : "")
+                    Label {
+                        Text(option.rawValue)
+                    } icon: {
+                        if viewModel.sortOption == option {
+                            Image(systemName: "checkmark")
+                        }
+                    }
                 }
             }
         }
@@ -103,7 +109,13 @@ struct VoiceLibraryView: View {
                 Button {
                     viewModel.setTypeFilter(type)
                 } label: {
-                    Label(type.rawValue.capitalized, systemImage: viewModel.filterType == type ? "checkmark" : "")
+                    Label {
+                        Text(type.rawValue.capitalized)
+                    } icon: {
+                        if viewModel.filterType == type {
+                            Image(systemName: "checkmark")
+                        }
+                    }
                 }
             }
         }
@@ -120,7 +132,13 @@ struct VoiceLibraryView: View {
                 Button {
                     viewModel.setLanguageFilter(language)
                 } label: {
-                    Label(language.rawValue, systemImage: viewModel.filterLanguage == language ? "checkmark" : "")
+                    Label {
+                        Text(language.rawValue)
+                    } icon: {
+                        if viewModel.filterLanguage == language {
+                            Image(systemName: "checkmark")
+                        }
+                    }
                 }
             }
         }

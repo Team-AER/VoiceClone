@@ -60,6 +60,31 @@ enum TTSCapability: String, Hashable, CaseIterable, Codable, Sendable {
             acceptedSnapshotCapabilities.contains($0.capability)
         }
     }
+
+    /// Snapshots that should be *displayed* in this capability's tab in the
+    /// Model Manager. Each `SnapshotCapability` has a single canonical home
+    /// tab so we never list the same variant in two places. Runtime
+    /// resolution still uses `compatibleSnapshots` — installing a Base
+    /// variant from the Voice Cloning tab will continue to satisfy Preset
+    /// Voices automatically.
+    var hostedSnapshots: [ModelSnapshot] {
+        compatibleSnapshots.filter { $0.capability.canonicalHostCapability == self }
+    }
+}
+
+extension SnapshotCapability {
+    /// The single `TTSCapability` tab this snapshot capability is listed
+    /// under in the Model Manager. Base lives under Voice Cloning because
+    /// cloning *requires* it and it transparently also covers presets;
+    /// CustomVoice is the dedicated preset-only path; VoiceDesign is its
+    /// own thing.
+    var canonicalHostCapability: TTSCapability {
+        switch self {
+        case .base:        return .voiceClone
+        case .customVoice: return .customVoice
+        case .voiceDesign: return .voiceDesign
+        }
+    }
 }
 
 /// TTS errors

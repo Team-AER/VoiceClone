@@ -47,6 +47,12 @@ final class ModelDownloadManager: NSObject, ObservableObject {
     /// `rescan()` and after each download / delete.
     @Published private(set) var snapshotDiskUsage: [ModelSnapshot: Int64] = [:]
 
+    /// Flips to `true` once the very first background validation pass has
+    /// finished publishing every snapshot's state. UI gates (e.g. `RootView`'s
+    /// "do we have any models?" check) wait on this so they don't flash the
+    /// download prompt while we're still validating an existing install.
+    @Published private(set) var isInitialScanComplete = false
+
     /// Selection store for keeping the user's per-capability picks consistent
     /// when snapshots are deleted. Optional so callers that don't care
     /// (e.g. the test harness) can omit it.
@@ -87,16 +93,17 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         config.waitsForConnectivity = true
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
 
-        // One-shot migration from the pre-matrix on-disk layout. Existing
-        // installs had three fixed directories; rename them in place so users
-        // don't re-download.
-        Self.migrateLegacyDirectoriesIfNeeded()
-
-        // Initial scan: see what's already on disk.
+        // Seed every snapshot in `.checking` so the UI has a determinate
+        // initial state. The actual filesystem probe (which has to read +
+        // parse multi-MB JSONs like tokenizer.json) runs entirely on a
+        // background task — we never touch disk content on the main thread.
         for snap in ModelSnapshot.allCases {
-            snapshotStates[snap] = Self.isInstalled(snap) ? .installed : .absent
-            snapshotDiskUsage[snap] = Self.diskUsage(of: snap)
+            snapshotStates[snap] = .checking
+            snapshotDiskUsage[snap] = 0
         }
+
+        // Disk migration + first validation pass. All file IO off main.
+        Task { await self.performInitialScan() }
     }
 
     /// Wire up the selection store so we can drop stale selections when the
@@ -197,13 +204,96 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         AppLog.info("Deleted snapshot: \(snapshot.displayName)", "download")
     }
 
-    /// Best-effort: re-scan disk and update snapshot states. Cheap.
+    /// Best-effort: re-scan disk and update snapshot states. Returns
+    /// immediately — the actual probe runs on a background task and publishes
+    /// per-snapshot results back on the main actor as each completes.
+    ///
+    /// Quick mode by default: skips the multi-MB JSON parse on `tokenizer.json`
+    /// and trusts file presence + safetensors header sniffs. The heavyweight
+    /// content validation runs once per launch in `performInitialScan`; doing
+    /// it again every time the Model Manager opens beachballed the UI.
     func rescan() {
-        for snap in ModelSnapshot.allCases {
-            // Don't clobber a download in progress.
+        Task { await performScan(skipDownloading: true, deepValidate: false) }
+    }
+
+    // MARK: - Background validation
+
+    /// First boot scan — also runs the legacy-directory migration. Both the
+    /// migration (file moves) and the validation (JSON parse, header sniff)
+    /// happen on a background task; the main thread is never blocked on disk.
+    private func performInitialScan() async {
+        // Migration is pure file IO — keep it off main.
+        await Task.detached(priority: .userInitiated) {
+            Self.migrateLegacyDirectoriesIfNeeded()
+        }.value
+
+        await performScan(skipDownloading: false, deepValidate: true)
+        isInitialScanComplete = true
+    }
+
+    /// Probe every (non-downloading, when `skipDownloading`) snapshot on disk
+    /// and stream the per-snapshot result back to `@Published` state. The
+    /// heavy work (`Data(contentsOf:)` on tokenizer.json, JSON parse, header
+    /// sniffs, `attributesOfItem` for size) runs on a detached task so the UI
+    /// thread stays free.
+    ///
+    /// `deepValidate` controls whether we re-parse JSON file contents. The
+    /// initial-launch scan does; on-demand rescans (e.g. opening the Model
+    /// Manager) skip it because parsing tokenizer.json on every open
+    /// beachballed the UI.
+    ///
+    /// Priority is `.userInitiated`: the consumer side runs on `@MainActor`
+    /// (also user-initiated), and a `.utility` producer would create a
+    /// priority inversion that Xcode flags as a hang risk and that the user
+    /// felt as visible scroll stutter.
+    private func performScan(skipDownloading: Bool, deepValidate: Bool) async {
+        let snapshots: [ModelSnapshot] = ModelSnapshot.allCases.filter { snap in
+            if skipDownloading, case .downloading = snapshotStates[snap] { return false }
+            return true
+        }
+        // Only flip *unknown* snapshots to `.checking`. Crucially, do NOT
+        // overwrite `.installed`: `RootView`'s gate is keyed on
+        // `snapshotStates.values.contains { $0.isInstalled }`, and momentarily
+        // setting every snapshot to `.checking` made the gate flip to "no
+        // models installed", which unmounted ContentView — and the Model
+        // Manager sheet hosted inside it — for the duration of the scan. The
+        // sheet appeared to flash and vanish on every open.
+        for snap in snapshots {
+            switch snapshotStates[snap] {
+            case .installed, .downloading, .failed:
+                continue
+            case .checking, .absent, .none:
+                snapshotStates[snap] = .checking
+            }
+        }
+
+        // Bridge worker → main with an AsyncStream. The producer runs
+        // sequentially on a background task so we never spike memory by
+        // parsing 18 × ~14 MB of JSON in parallel.
+        let stream = AsyncStream<(ModelSnapshot, SnapshotInstallState, Int64)> { cont in
+            let pending = snapshots
+            let deep = deepValidate
+            Task.detached(priority: .userInitiated) {
+                for snap in pending {
+                    let installed = deep
+                        ? Self.isInstalled(snap)
+                        : Self.isInstalledQuick(snap)
+                    let usage = Self.diskUsage(of: snap)
+                    cont.yield((snap, installed ? .installed : .absent, usage))
+                }
+                cont.finish()
+            }
+        }
+
+        for await (snap, state, usage) in stream {
+            // Late race: a download started while we were validating. Honour
+            // the in-flight state instead of stomping it back to absent.
             if case .downloading = snapshotStates[snap] { continue }
-            snapshotStates[snap] = Self.isInstalled(snap) ? .installed : .absent
-            snapshotDiskUsage[snap] = Self.diskUsage(of: snap)
+            snapshotStates[snap] = state
+            snapshotDiskUsage[snap] = usage
+            if state.isInstalled {
+                selectionStore?.autoSelectIfUnconfigured(snap)
+            }
         }
     }
 
@@ -234,6 +324,23 @@ final class ModelDownloadManager: NSObject, ObservableObject {
             let url = dir.appendingPathComponent(file.relativePath)
             guard fm.fileExists(atPath: url.path) else { return false }
             guard contentIsValid(at: url) else { return false }
+        }
+        return true
+    }
+
+    /// Fast variant of `isInstalled` for re-scans: file presence + a sane
+    /// non-zero size. Skips the `JSONSerialization.jsonObject` parse on
+    /// `tokenizer.json` (~11 MB), which is what made repeated Model Manager
+    /// opens visibly stutter. Trust the deep validation that ran at boot
+    /// (and after each download) until something has actually changed.
+    nonisolated static func isInstalledQuick(_ snapshot: ModelSnapshot) -> Bool {
+        let fm = FileManager.default
+        let dir = directory(for: snapshot)
+        for file in snapshot.manifest {
+            let url = dir.appendingPathComponent(file.relativePath)
+            guard fm.fileExists(atPath: url.path) else { return false }
+            let size = (try? fm.attributesOfItem(atPath: url.path)[.size]) as? NSNumber
+            guard (size?.int64Value ?? 0) > 0 else { return false }
         }
         return true
     }

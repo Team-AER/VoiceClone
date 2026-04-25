@@ -19,6 +19,21 @@ final class CoreDataStack: @unchecked Sendable {
 
     let container: NSPersistentContainer
 
+    /// Long-lived private-queue context used for every off-main read/write.
+    ///
+    /// We deliberately *don't* use `container.performBackgroundTask { … }`
+    /// here: that API spins up a fresh context whose internal dispatch queue
+    /// is fixed at default/background QoS, so when `@MainActor` (user-initiated)
+    /// callers `await` the result the runtime sees a User-initiated thread
+    /// blocked on a Background thread. Xcode flags it as a hang risk and the
+    /// OS only saves us via priority boosting, which lags.
+    ///
+    /// `NSManagedObjectContext.perform(_:)` on a private-queue context, by
+    /// contrast, propagates the awaiting task's QoS. Funneling everything
+    /// through one shared context also serializes our writes for free, which
+    /// matches what we want anyway (no concurrent saves to the voice library).
+    let backgroundContext: NSManagedObjectContext
+
     /// Non-nil when the persistent (SQLite) store failed to load and we
     /// fell back to an in-memory store. UI surfaces this as a warning
     /// banner; saves still succeed but only for the current process.
@@ -73,6 +88,10 @@ final class CoreDataStack: @unchecked Sendable {
 
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
+
+        backgroundContext = container.newBackgroundContext()
+        backgroundContext.automaticallyMergesChangesFromParent = true
+        backgroundContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
     }
 
     func save() throws {
@@ -81,7 +100,8 @@ final class CoreDataStack: @unchecked Sendable {
     }
 
     nonisolated func performBackgroundTask<T: Sendable>(_ block: @escaping @Sendable (NSManagedObjectContext) throws -> T) async throws -> T {
-        try await container.performBackgroundTask { context in
+        let context = backgroundContext
+        return try await context.perform {
             try block(context)
         }
     }
