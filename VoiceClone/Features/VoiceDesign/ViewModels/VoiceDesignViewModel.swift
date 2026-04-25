@@ -127,6 +127,21 @@ final class VoiceDesignViewModel: ObservableObject {
     func synthesize() async {
         guard let tts = ttsService else { return }
 
+        // Defensive: ensure the VoiceDesign snapshot is loaded. Idempotent
+        // when already loaded; closes any race with the setup load still
+        // being in flight (e.g. the user navigated to this tab and tapped
+        // Generate before the model finished swapping in).
+        do {
+            try await tts.loadCapability(.voiceDesign)
+            missingSnapshot = nil
+        } catch let TTSError.snapshotNotInstalled(snap) {
+            missingSnapshot = snap
+            return
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+
         isSynthesizing = true
         canSaveVoice = false
         waveformSamples = []

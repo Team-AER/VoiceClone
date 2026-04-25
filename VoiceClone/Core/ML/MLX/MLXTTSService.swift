@@ -7,9 +7,27 @@
 //  load + hot-swap, and adapts the package's MLXArray output into the app's
 //  AudioChunk streaming API.
 //
+//  Two performance shapes worth knowing:
+//
+//  1. Synthesis runs OFF the MainActor.
+//     `model.generate(...)` is declared `async` but is internally synchronous —
+//     awaiting it from a `@MainActor` method drags the entire token-by-token
+//     loop onto the main thread and freezes the UI for the duration of the
+//     synthesis. We hop to a detached background task for the actual model
+//     call and only return to the MainActor to publish state + yield audio.
+//
+//  2. Long text is split into chunks at sentence boundaries.
+//     One generation = one growing KV cache = one giant final decode. For a
+//     500-character input that's ~30 s of audio and several GB of transient
+//     MLXArrays, plus the user waits for the whole thing before hearing
+//     anything. Splitting on sentences via `TextChunker` gives:
+//        - audio yields chunk-by-chunk → playback starts after sentence 1
+//        - per-chunk KV cache is freed before the next chunk runs
+//        - peak memory stays bounded by a single chunk regardless of length
+//
 
-import Foundation
-import MLX
+@preconcurrency import Foundation
+@preconcurrency import MLX
 import AVFoundation
 
 /// TTS service backed by the vendored Qwen3TTS implementation.
@@ -22,6 +40,17 @@ final class MLXTTSService: ObservableObject {
     @Published private(set) var state: TTSServiceState = .idle
     @Published private(set) var loadedCapabilities: Set<TTSCapability> = []
     @Published private(set) var loadedSnapshot: ModelSnapshot?
+
+    /// GPU peak memory observed during the last completed synthesis, in
+    /// bytes. Zero until the first generation finishes. Useful as a runtime
+    /// sanity check that inference is hitting the GPU — a value of 0 here
+    /// after a non-trivial synthesis means MLX silently fell back to CPU.
+    @Published private(set) var lastSynthesisPeakGPUBytes: Int = 0
+    /// Wall-clock seconds for the last completed synthesis (model time
+    /// only — excludes WAV decode / playback start).
+    @Published private(set) var lastSynthesisDuration: TimeInterval = 0
+    /// Number of text chunks the most recent synthesis was split into.
+    @Published private(set) var lastSynthesisChunkCount: Int = 0
 
     // MARK: - Private state
 
@@ -198,7 +227,8 @@ final class MLXTTSService: ObservableObject {
         instruction: String?,
         continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation
     ) async {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let chunks = TextChunker.chunk(text)
+        guard !chunks.isEmpty else {
             continuation.finish(throwing: TTSError.tokenizationFailed)
             state = .error("Empty text")
             return
@@ -209,21 +239,18 @@ final class MLXTTSService: ObservableObject {
             return
         }
 
-        state = .synthesizing(progress: 0)
-        do {
-            // Both CustomVoice and Base snapshots route preset synthesis
-            // through `generate(...)`, which dispatches by tts_model_type.
-            let audio = try await model.generate(
-                text: text,
+        await runChunks(
+            chunks: chunks,
+            sampleRate: model.sampleRate,
+            continuation: continuation
+        ) { chunkText in
+            try await Self.generatePreset(
+                model: model,
+                text: chunkText,
                 speaker: speaker,
-                instruct: instruction,
+                instruction: instruction,
                 language: language.qwenLanguageCode
             )
-            try yieldAudio(audio, sampleRate: model.sampleRate, to: continuation)
-            state = .ready
-        } catch {
-            continuation.finish(throwing: error)
-            state = .error(error.localizedDescription)
         }
     }
 
@@ -233,7 +260,8 @@ final class MLXTTSService: ObservableObject {
         instruction: String,
         continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation
     ) async {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let chunks = TextChunker.chunk(text)
+        guard !chunks.isEmpty else {
             continuation.finish(throwing: TTSError.tokenizationFailed)
             state = .error("Empty text")
             return
@@ -244,21 +272,17 @@ final class MLXTTSService: ObservableObject {
             return
         }
 
-        state = .synthesizing(progress: 0)
-        do {
-            // VoiceDesign snapshot ignores `speaker`; passing nil routes to
-            // generateVoiceDesign() inside the dispatcher.
-            let audio = try await model.generate(
-                text: text,
-                speaker: nil,
-                instruct: instruction,
+        await runChunks(
+            chunks: chunks,
+            sampleRate: model.sampleRate,
+            continuation: continuation
+        ) { chunkText in
+            try await Self.generateDesign(
+                model: model,
+                text: chunkText,
+                instruction: instruction,
                 language: language.qwenLanguageCode
             )
-            try yieldAudio(audio, sampleRate: model.sampleRate, to: continuation)
-            state = .ready
-        } catch {
-            continuation.finish(throwing: error)
-            state = .error(error.localizedDescription)
         }
     }
 
@@ -269,9 +293,11 @@ final class MLXTTSService: ObservableObject {
         referenceText: String,
         continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation
     ) async {
-        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedRef = referenceText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty, !trimmedRef.isEmpty else {
+        // Cloning chunks slightly larger because each chunk re-runs the
+        // whole ICL setup — fewer chunks means less overhead.
+        let chunks = TextChunker.chunk(text, maxCharacters: 320)
+        guard !chunks.isEmpty, !trimmedRef.isEmpty else {
             continuation.finish(throwing: TTSError.tokenizationFailed)
             state = .error("Text and reference transcript are required")
             return
@@ -290,38 +316,166 @@ final class MLXTTSService: ObservableObject {
             return
         }
 
-        state = .synthesizing(progress: 0)
+        // Decode reference audio once, before the loop — it's the same for
+        // every chunk.
+        let refSamples: [Float]
         do {
-            let refSamples = try Self.loadReferenceAudio(referenceAudioData)
-            let refArray = MLXArray(refSamples)
-            let audio = try model.generateVoiceClone(
-                text: trimmedText,
-                referenceAudio: refArray,
-                referenceText: trimmedRef,
-                language: language.qwenLanguageCode
-            )
-            try yieldAudio(audio, sampleRate: model.sampleRate, to: continuation)
-            state = .ready
+            refSamples = try Self.loadReferenceAudio(referenceAudioData)
         } catch {
             continuation.finish(throwing: error)
             state = .error(error.localizedDescription)
+            return
+        }
+
+        await runChunks(
+            chunks: chunks,
+            sampleRate: model.sampleRate,
+            continuation: continuation
+        ) { chunkText in
+            try await Self.generateClone(
+                model: model,
+                text: chunkText,
+                referenceSamples: refSamples,
+                referenceText: trimmedRef,
+                language: language.qwenLanguageCode
+            )
         }
     }
 
-    private func yieldAudio(
-        _ audio: MLXArray,
+    /// Shared chunked-synthesis driver. Runs each chunk's `generate(...)` on
+    /// a detached task (off the MainActor), yields its audio, frees the GPU
+    /// cache, then proceeds to the next chunk. Updates `state.synthesizing`
+    /// progress between chunks.
+    private func runChunks(
+        chunks: [String],
         sampleRate: Int,
-        to continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation
-    ) throws {
-        eval(audio)
-        let samples = audio.asArray(Float.self)
-        let chunk = AudioChunk(
-            samples: samples,
-            sampleRate: sampleRate,
-            timestamp: Date().timeIntervalSince1970
-        )
-        continuation.yield(chunk)
+        continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation,
+        generate: @escaping @Sendable (String) async throws -> [Float]
+    ) async {
+        state = .synthesizing(progress: 0)
+        let probe = startGenerationProbe()
+        lastSynthesisChunkCount = chunks.count
+
+        for (index, chunkText) in chunks.enumerated() {
+            do {
+                // Heavy lift on a detached task — keeps the MainActor free
+                // so SwiftUI redraws and user input keep responding.
+                let samples = try await Task.detached(priority: .userInitiated) {
+                    try await generate(chunkText)
+                }.value
+
+                let chunk = AudioChunk(
+                    samples: samples,
+                    sampleRate: sampleRate,
+                    timestamp: Date().timeIntervalSince1970
+                )
+                continuation.yield(chunk)
+
+                // Release MLX scratch buffers from this chunk's KV cache so
+                // the next chunk doesn't compound peak memory.
+                GPU.clearCache()
+
+                // Progress = fraction of chunks completed.
+                let progress = Double(index + 1) / Double(chunks.count)
+                state = .synthesizing(progress: progress)
+            } catch {
+                continuation.finish(throwing: error)
+                finishGenerationProbe(probe)
+                state = .error(error.localizedDescription)
+                return
+            }
+        }
+
         continuation.finish()
+        finishGenerationProbe(probe)
+        state = .ready
+    }
+
+    // MARK: - Off-actor generators
+    //
+    // `nonisolated static` so they can be called from a `Task.detached`
+    // without dragging MainActor isolation along. The model is passed in
+    // explicitly so the closure capture list stays Sendable-clean.
+
+    nonisolated private static func generatePreset(
+        model: Qwen3TTSModel,
+        text: String,
+        speaker: String,
+        instruction: String?,
+        language: String
+    ) async throws -> [Float] {
+        let audio = try await model.generate(
+            text: text,
+            speaker: speaker,
+            instruct: instruction,
+            language: language
+        )
+        return materialize(audio)
+    }
+
+    nonisolated private static func generateDesign(
+        model: Qwen3TTSModel,
+        text: String,
+        instruction: String,
+        language: String
+    ) async throws -> [Float] {
+        let audio = try await model.generate(
+            text: text,
+            speaker: nil,
+            instruct: instruction,
+            language: language
+        )
+        return materialize(audio)
+    }
+
+    nonisolated private static func generateClone(
+        model: Qwen3TTSModel,
+        text: String,
+        referenceSamples: [Float],
+        referenceText: String,
+        language: String
+    ) throws -> [Float] {
+        let refArray = MLXArray(referenceSamples)
+        let audio = try model.generateVoiceClone(
+            text: text,
+            referenceAudio: refArray,
+            referenceText: referenceText,
+            language: language
+        )
+        return materialize(audio)
+    }
+
+    /// Force MLX to materialise the array on the GPU and pull the resulting
+    /// samples back as a Swift `[Float]`. This is the single sync point
+    /// per chunk.
+    nonisolated private static func materialize(_ audio: MLXArray) -> [Float] {
+        eval(audio)
+        return audio.asArray(Float.self)
+    }
+
+    // MARK: - GPU diagnostics
+
+    /// Reset MLX peak-memory tracking and capture a wall-clock start time.
+    /// Used to verify each generation actually hit the GPU.
+    private func startGenerationProbe() -> (start: CFAbsoluteTime, baseline: Int) {
+        let baseline = GPU.peakMemory
+        GPU.resetPeakMemory()
+        return (CFAbsoluteTimeGetCurrent(), baseline)
+    }
+
+    /// Read the GPU peak after generation, log it, and publish for the UI.
+    /// A non-zero peak proves the work landed on Metal; a zero peak after
+    /// a non-trivial synthesis means we silently fell back to CPU.
+    private func finishGenerationProbe(_ probe: (start: CFAbsoluteTime, baseline: Int)) {
+        let elapsed = CFAbsoluteTimeGetCurrent() - probe.start
+        let peak = GPU.peakMemory
+        lastSynthesisDuration = elapsed
+        lastSynthesisPeakGPUBytes = peak
+        let mb = Double(peak) / (1024.0 * 1024.0)
+        print(String(
+            format: "🎙️ synthesis done in %.2fs over %d chunks — GPU peak %.1f MB",
+            elapsed, lastSynthesisChunkCount, mb
+        ))
     }
 
     // MARK: - Reference audio decoding

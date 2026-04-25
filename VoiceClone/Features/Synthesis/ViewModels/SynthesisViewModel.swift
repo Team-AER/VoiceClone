@@ -137,16 +137,26 @@ final class SynthesisViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Hot-swap the model when the user picks a different voice.
+        // When the user picks a different voice, immediately update
+        // `missingSnapshot` (cheap disk check) so the UI can render the
+        // download prompt right away. The actual model load is deferred
+        // until `synthesize()` runs — see comment there for why.
         $selectedOption
             .removeDuplicates()
             .dropFirst()  // initial value handled by setup
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self else { return }
-                Task { await self.loadCapabilityForSelection() }
+                self?.refreshMissingSnapshot()
             }
             .store(in: &cancellables)
+    }
+
+    /// Cheap, synchronous: just checks the filesystem for the snapshot the
+    /// current selection needs. Used to show / hide the download prompt
+    /// without kicking off a model load.
+    private func refreshMissingSnapshot() {
+        let needed = selectedOption.requiredCapability.requiredSnapshot
+        missingSnapshot = ModelDownloadManager.isInstalled(needed) ? nil : needed
     }
 
     /// Refresh the voice picker — call after the Library tab adds/removes a
@@ -186,6 +196,22 @@ final class SynthesisViewModel: ObservableObject {
 
     func synthesize() async {
         guard let tts = ttsService else { return }
+
+        // Make sure the snapshot for the selected voice is loaded before we
+        // try to synthesize. Selecting a saved cloned voice triggers a Base
+        // snapshot swap (~1.8 GB → ~5 s) that previously raced with the
+        // user tapping Speak; awaiting it here closes the race. The call is
+        // a cheap no-op when the right snapshot is already loaded.
+        do {
+            try await tts.loadCapability(selectedOption.requiredCapability)
+            missingSnapshot = nil
+        } catch let TTSError.snapshotNotInstalled(snap) {
+            missingSnapshot = snap
+            return
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
 
         isSynthesizing = true
         waveformSamples = []

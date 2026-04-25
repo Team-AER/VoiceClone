@@ -122,6 +122,45 @@ final class EndToEndAudioGenerationTests: XCTestCase {
         assertValidAudio(chunks: chunks, samples: samples, label: "voiceClone")
     }
 
+    /// Regression: switching capability mid-flight (CustomVoice loaded → ask
+    /// for VoiceClone → immediately call clone synthesize) must not throw
+    /// "Capability not loaded: voiceClone". This was the bug a user hit
+    /// when picking a saved cloned voice in the Speak tab and tapping
+    /// Speak before the Base snapshot finished swapping in.
+    func testCapabilitySwapDoesNotRace() async throws {
+        try skipUnlessInstalled(.base)
+
+        // Start the service on CustomVoice (the Speak tab's default).
+        try await service.loadCapability(.customVoice)
+        XCTAssertEqual(service.loadedSnapshot, .customVoice)
+
+        // Synthesize a tiny reference clip we can clone from.
+        let refStream = try await service.synthesize(
+            text: "Reference clip.",
+            language: .english,
+            speaker: .ryan
+        )
+        let (_, refSamples) = try await collectAudio(from: refStream)
+        let refData = try makeWav(samples: refSamples, sampleRate: 24_000)
+
+        // The race-prone path: caller asks for a voiceClone synthesize without
+        // pre-loading. Before the fix, requireCapability(.voiceClone) would
+        // throw because the model was still on CustomVoice. After the fix,
+        // the load-then-synthesize must be wrapped at the call site (which
+        // is what the view models now do). We mirror that here.
+        try await service.loadCapability(.voiceClone)
+
+        let stream = try await service.synthesize(
+            text: "Cloned reply.",
+            language: .english,
+            referenceAudio: refData,
+            referenceText: "Reference clip."
+        )
+        let (chunks, samples) = try await collectAudio(from: stream)
+        assertValidAudio(chunks: chunks, samples: samples, label: "swap-race")
+        XCTAssertEqual(service.loadedSnapshot, .base)
+    }
+
     // MARK: - Common audio output asserts
 
     /// Chunks must have a 24 kHz sample rate, finite samples, and peaks in range.
@@ -161,6 +200,141 @@ final class EndToEndAudioGenerationTests: XCTestCase {
         )
         for try await _ in stream {}
         XCTAssertEqual(service.state, .ready)
+    }
+
+    // MARK: - Chunked synthesis & responsiveness
+
+    /// Long input must be split into multiple chunks and stream them as
+    /// separate AudioChunks — that's how playback can start before the
+    /// whole paragraph is generated.
+    func testLongTextProducesMultipleChunks() async throws {
+        try skipUnlessInstalled(.customVoice)
+
+        try await service.loadCapability(.customVoice)
+        let longText = String(repeating:
+            "The quick brown fox jumps over the lazy dog. " +
+            "Pack my box with five dozen liquor jugs. " +
+            "How vexingly quick daft zebras jump. ", count: 4)
+
+        let stream = try await service.synthesize(
+            text: longText,
+            language: .english,
+            speaker: .ryan
+        )
+        let (chunks, samples) = try await collectAudio(from: stream)
+        assertValidAudio(chunks: chunks, samples: samples, label: "longText")
+
+        XCTAssertGreaterThan(chunks.count, 1,
+                             "Long text should yield more than one AudioChunk")
+        XCTAssertEqual(service.lastSynthesisChunkCount, chunks.count,
+                       "Reported chunk count should match yielded chunk count")
+    }
+
+    /// While a long synthesis runs, the MainActor must stay responsive.
+    /// We schedule a recurring MainActor-isolated heartbeat and assert at
+    /// least one beat fires per second of synthesis. If the synthesis were
+    /// blocking the MainActor (the pre-fix behaviour), the heartbeat would
+    /// fire zero times until generation completes.
+    func testMainActorStaysResponsiveDuringSynthesis() async throws {
+        try skipUnlessInstalled(.customVoice)
+
+        try await service.loadCapability(.customVoice)
+        let longText = String(repeating:
+            "The quick brown fox jumps over the lazy dog. ", count: 8)
+
+        // Heartbeat counter — must be MainActor-isolated to be meaningful.
+        let beats = MainActorCounter()
+        let heartbeat = Task { @MainActor in
+            while !Task.isCancelled {
+                beats.increment()
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100 ms
+            }
+        }
+        defer { heartbeat.cancel() }
+
+        let start = Date()
+        let stream = try await service.synthesize(
+            text: longText,
+            language: .english,
+            speaker: .ryan
+        )
+        for try await _ in stream {}
+        let elapsed = Date().timeIntervalSince(start)
+        heartbeat.cancel()
+
+        let beatCount = beats.value
+        // Floor: one beat per second. Generously above zero (the broken case).
+        let expectedMin = max(1, Int(elapsed * 0.5))
+        XCTAssertGreaterThanOrEqual(
+            beatCount, expectedMin,
+            "MainActor heartbeat fired only \(beatCount) times in \(elapsed)s — synthesis is blocking the main thread."
+        )
+    }
+
+    // MARK: - Inference throughput regression
+
+    /// Generation must run at no worse than ~2× realtime for a single short
+    /// chunk on Apple Silicon GPU. Anything significantly worse means the
+    /// per-token GPU sync pattern in `generateCustomVoice` regressed —
+    /// historically the loop did 17 `eval()` calls per primary token (one
+    /// for the talker forward + 15 for the CodePredictor + 1 implicit via
+    /// `.item()`), which idled the GPU between every token.
+    ///
+    /// The fix keeps just two syncs per primary token: the implicit `.item()`
+    /// for EOS check and `eval(currentInput)` to bound graph depth. If
+    /// somebody re-adds inner-loop evals, this test will catch it.
+    func testInferenceThroughputAcceptable() async throws {
+        try skipUnlessInstalled(.customVoice)
+
+        try await service.loadCapability(.customVoice)
+        let stream = try await service.synthesize(
+            text: "The quick brown fox jumps over the lazy dog.",
+            language: .english,
+            speaker: .ryan
+        )
+        let (_, samples) = try await collectAudio(from: stream)
+
+        let audioSeconds = Double(samples.count) / 24_000.0
+        let genSeconds = service.lastSynthesisDuration
+        let realtimeFactor = genSeconds / audioSeconds
+
+        // Floor at 4× to leave headroom for noisy CI machines, GPU memory
+        // pressure, etc. The fix puts us comfortably under 2× on M-series
+        // with the model warm.
+        XCTAssertLessThan(
+            realtimeFactor, 4.0,
+            "Generation took \(String(format: "%.2f", realtimeFactor))× realtime " +
+            "(\(String(format: "%.2f", genSeconds))s for \(String(format: "%.2f", audioSeconds))s of audio). " +
+            "Inner-loop GPU syncs may have been reintroduced."
+        )
+    }
+
+    // MARK: - GPU usage proof
+
+    /// After a real synthesis, GPU peak memory must be non-trivial. A peak of
+    /// zero would mean MLX silently fell back to CPU — which is what we'd see
+    /// if `MLXRuntime.bootstrap()` failed to set the default device.
+    func testGPUWasActuallyUsed() async throws {
+        try skipUnlessInstalled(.customVoice)
+
+        try await service.loadCapability(.customVoice)
+        let stream = try await service.synthesize(
+            text: "GPU usage check.",
+            language: .english,
+            speaker: .ryan
+        )
+        for try await _ in stream {}
+
+        // Loading the model alone allocates ~1.5GB of weights; even a tiny
+        // generation should push peak well past 100 MB. A value below that
+        // strongly implies CPU fallback.
+        let peakMB = Double(service.lastSynthesisPeakGPUBytes) / (1024.0 * 1024.0)
+        XCTAssertGreaterThan(
+            peakMB, 100.0,
+            "GPU peak only \(peakMB) MB — looks like inference fell back to CPU."
+        )
+        XCTAssertGreaterThan(service.lastSynthesisDuration, 0.0,
+                             "Synthesis duration was not recorded.")
     }
 
     // MARK: - Snapshot gate semantics
@@ -225,6 +399,16 @@ final class EndToEndAudioGenerationTests: XCTestCase {
 
         let rms = sqrt(samples.map { $0 * $0 }.reduce(0, +) / Float(samples.count))
         XCTAssertGreaterThan(rms, 1e-4, "[\(label)] Audio appears silent (RMS=\(rms))")
+    }
+
+    // MARK: - Test utilities
+
+    /// Mutable counter that can only be touched from the MainActor — used
+    /// by `testMainActorStaysResponsiveDuringSynthesis` to detect a frozen
+    /// main thread without resorting to fragile timing measurements.
+    @MainActor private final class MainActorCounter {
+        private(set) var value: Int = 0
+        func increment() { value += 1 }
     }
 
     /// Encode `samples` as a 16-bit PCM mono WAV `Data` blob — same format

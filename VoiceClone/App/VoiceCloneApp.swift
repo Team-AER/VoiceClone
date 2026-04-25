@@ -13,6 +13,12 @@ struct VoiceCloneApp: App {
     @StateObject private var container = DIContainer()
     @StateObject private var downloadManager = ModelDownloadManager()
 
+    init() {
+        // Pin the MLX default device to .gpu and set sensible Metal memory
+        // limits before any DIContainer / MLXTTSService init touches MLX.
+        MLXRuntime.bootstrap()
+    }
+
     #if os(iOS)
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #elseif os(macOS)

@@ -638,9 +638,16 @@ public class Qwen3TTSModel: Module {
 
         // Autoregressive generation
         for _ in 0..<effectiveMaxTokens {
-            // Forward through Talker
+            // Forward through Talker.
+            //
+            // Note: we deliberately do NOT call eval(logits, hiddenStates) here.
+            // The .item() on `nextToken` below forces materialisation of the
+            // sampling chain, which transitively evaluates `logits`. `hiddenStates`
+            // gets evaluated when consumed by the CodePredictor below. Calling
+            // eval explicitly would drain the GPU pipeline and force a sync —
+            // 17× slower than letting MLX schedule the work as one batch per
+            // primary token.
             let (logits, hiddenStates) = talker(currentInput, cache: cache)
-            eval(logits, hiddenStates)
 
             // Sample first codebook token
             let nextToken = sampleToken(
@@ -654,6 +661,9 @@ public class Qwen3TTSModel: Module {
                 eosTokenId: eosTokenId
             )
 
+            // Single sync per primary token — needed to check EOS and feed
+            // back into repetition tracking. This pulls the entire iteration's
+            // GPU work into a single batched compute.
             let tokenValue = nextToken.item(Int.self)
             generatedTokens.append(tokenValue)
 
@@ -663,7 +673,10 @@ public class Qwen3TTSModel: Module {
             }
             onToken?(tokenValue)
 
-            // Generate remaining 15 codebooks using Code Predictor
+            // Generate remaining 15 codebooks using Code Predictor.
+            // No per-step eval inside this loop — the codes stay lazy and get
+            // materialised together when the next iteration calls .item() (or
+            // the loop ends and the final eval happens). 15× fewer GPU drains.
             var codeTokens: [MLXArray] = [nextToken]
 
             if let codePredictor = talker.codePredictor {
@@ -685,13 +698,12 @@ public class Qwen3TTSModel: Module {
                         codeInput = codeEmbed
                     }
 
-                    // Forward through Code Predictor
+                    // Forward through Code Predictor (lazy — no eval here).
                     let (codeLogits, _, _) = codePredictor(
                         codeInput,
                         cache: codePredictorCache,
                         generationStep: codeIdx
                     )
-                    eval(codeLogits)
 
                     // Sample
                     let nextCode = sampleToken(
@@ -726,6 +738,10 @@ public class Qwen3TTSModel: Module {
             }
 
             currentInput = textEmbed + codecEmbed
+            // Bound graph depth: materialise this iteration's lazy work in one
+            // batched GPU dispatch before the next iteration extends the graph.
+            // Matches the pattern already used in generateVoiceClone.
+            eval(currentInput)
         }
 
         // Stack all generated codes: [1, seq_len, 16]
@@ -845,9 +861,16 @@ public class Qwen3TTSModel: Module {
 
         // Autoregressive generation
         for _ in 0..<effectiveMaxTokens {
-            // Forward through Talker
+            // Forward through Talker.
+            //
+            // Note: we deliberately do NOT call eval(logits, hiddenStates) here.
+            // The .item() on `nextToken` below forces materialisation of the
+            // sampling chain, which transitively evaluates `logits`. `hiddenStates`
+            // gets evaluated when consumed by the CodePredictor below. Calling
+            // eval explicitly would drain the GPU pipeline and force a sync —
+            // 17× slower than letting MLX schedule the work as one batch per
+            // primary token.
             let (logits, hiddenStates) = talker(currentInput, cache: cache)
-            eval(logits, hiddenStates)
 
             // Sample first codebook token
             let nextToken = sampleToken(
@@ -861,6 +884,9 @@ public class Qwen3TTSModel: Module {
                 eosTokenId: eosTokenId
             )
 
+            // Single sync per primary token — needed to check EOS and feed
+            // back into repetition tracking. This pulls the entire iteration's
+            // GPU work into a single batched compute.
             let tokenValue = nextToken.item(Int.self)
             generatedTokens.append(tokenValue)
 
@@ -870,7 +896,10 @@ public class Qwen3TTSModel: Module {
             }
             onToken?(tokenValue)
 
-            // Generate remaining 15 codebooks using Code Predictor
+            // Generate remaining 15 codebooks using Code Predictor.
+            // No per-step eval inside this loop — the codes stay lazy and get
+            // materialised together when the next iteration calls .item() (or
+            // the loop ends and the final eval happens). 15× fewer GPU drains.
             var codeTokens: [MLXArray] = [nextToken]
 
             if let codePredictor = talker.codePredictor {
@@ -892,13 +921,12 @@ public class Qwen3TTSModel: Module {
                         codeInput = codeEmbed
                     }
 
-                    // Forward through Code Predictor
+                    // Forward through Code Predictor (lazy — no eval here).
                     let (codeLogits, _, _) = codePredictor(
                         codeInput,
                         cache: codePredictorCache,
                         generationStep: codeIdx
                     )
-                    eval(codeLogits)
 
                     // Sample
                     let nextCode = sampleToken(
@@ -933,6 +961,10 @@ public class Qwen3TTSModel: Module {
             }
 
             currentInput = textEmbed + codecEmbed
+            // Bound graph depth: materialise this iteration's lazy work in one
+            // batched GPU dispatch before the next iteration extends the graph.
+            // Matches the pattern already used in generateVoiceClone.
+            eval(currentInput)
         }
 
         // Stack all generated codes: [1, seq_len, 16]

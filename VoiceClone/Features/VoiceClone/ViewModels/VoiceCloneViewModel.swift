@@ -157,6 +157,21 @@ final class VoiceCloneViewModel: ObservableObject {
     func synthesize() async {
         guard let tts = ttsService, let audioData = referenceAudioData else { return }
 
+        // Defensive: ensure the Base snapshot is loaded. Idempotent when
+        // already loaded. Same race-fix as the Speak tab: prevents
+        // "Capability not loaded: voiceClone" errors when the user records,
+        // types, and taps Clone before the setup load completes.
+        do {
+            try await tts.loadCapability(.voiceClone)
+            missingSnapshot = nil
+        } catch let TTSError.snapshotNotInstalled(snap) {
+            missingSnapshot = snap
+            return
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+
         isSynthesizing = true
         canSaveVoice = false
         generatedChunks = []
