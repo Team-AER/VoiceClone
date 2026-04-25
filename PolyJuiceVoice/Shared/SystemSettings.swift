@@ -18,6 +18,7 @@ enum SystemSettings {
 
     /// Open the OS settings UI focused on the app's microphone permission
     /// page (best-effort; falls back to the general app settings page).
+    @MainActor
     static func openMicrophoneSettings() {
         #if os(iOS)
         if let url = URL(string: UIApplication.openSettingsURLString),

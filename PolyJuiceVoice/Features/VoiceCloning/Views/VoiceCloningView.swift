@@ -39,6 +39,7 @@ struct VoiceCloningView: View {
                     }
                     .scrollContentBackground(.hidden)
                     .scrollEdgeEffectStyle(.soft, for: .top)
+                    .scrollDismissesKeyboard(.immediately)
                     .safeAreaInset(edge: .bottom) {
                         synthesizeButton
                             .padding(.horizontal, 18)

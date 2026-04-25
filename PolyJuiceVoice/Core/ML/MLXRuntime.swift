@@ -44,28 +44,35 @@ enum MLXRuntime {
         // 0.1. Sweep stale recordings / exports the previous session left behind.
         TempCleaner.sweep()
 
-        // 1. Pin the default device to .gpu explicitly.
-        Device.setDefault(device: .gpu)
+        // 1. mlx-swift already defaults to .gpu (Device.swift: `_defaultDevice ?? .gpu`).
+        //    No explicit pin needed; the sections below configure memory limits.
 
         // 2. Read what Metal reports for this machine.
         let info = GPU.deviceInfo()
         let recommendedSet = Int(info.maxRecommendedWorkingSetSize)
 
-        // 3. Memory limit: the mlx-swift default is 1.5× recommended. We
-        //    cap at exactly the recommended working set to avoid spilling
-        //    into swap — model + activations for the 1.7B bf16 snapshot
-        //    plus the speech tokenizer top out around ~5 GB, well under
-        //    the recommended set on any Apple Silicon Mac that can run
-        //    this app.
+        // 3. Memory + cache limits — sized for each platform's budget.
+        //
+        //    macOS: Apple Silicon Macs comfortably hold the 1.7B bf16
+        //    snapshot (~5 GB peak), so we floor the memory limit at 4 GB
+        //    and allow relaxed overflow. Cache at 512 MB keeps RSS tidy
+        //    across long multi-chunk generations.
+        //
+        //    iOS: jetsam kills foreground apps at ~2.5–3 GB on most
+        //    iPhones (more on iPad Pro). Raising the MLX limit above
+        //    recommendedSet is counterproductive — the OS kills the process
+        //    before MLX ever honours a 4 GB ceiling. We use the device's
+        //    own recommendation as a hard cap and shrink the cache to
+        //    128 MB so it doesn't crowd out model weights.
+        #if os(iOS)
+        let memoryLimit = recommendedSet
+        GPU.set(memoryLimit: memoryLimit, relaxed: true)
+        let cacheLimit = 128 * 1024 * 1024
+        #else
         let memoryLimit = max(recommendedSet, 4 * 1024 * 1024 * 1024)
         GPU.set(memoryLimit: memoryLimit, relaxed: true)
-
-        // 4. Cache limit: 512 MB. The MLX docs explicitly call out that
-        //    small cache sizes (~tens of MB) often perform as well as
-        //    unbounded for inference; we leave headroom for the speech
-        //    tokenizer's intermediate buffers without growing RSS by
-        //    several GB across many generations.
         let cacheLimit = 512 * 1024 * 1024
+        #endif
         GPU.set(cacheLimit: cacheLimit)
 
         let config = Configuration(

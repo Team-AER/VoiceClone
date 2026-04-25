@@ -220,9 +220,20 @@ public class TalkerAttention: Module {
         // Apply MRoPE
         (q, k) = applyRotaryPosEmb(q: q, k: k, cos: positionEmbeddings.cos, sin: positionEmbeddings.sin)
 
-        // Update KV cache
+        // Update KV cache.
+        // When the cache has been quantized (toQuantized() on iOS after prefill),
+        // updateQuantized stores k/v in 4-bit and returns the quantized tuples.
+        // We dequantize immediately so the rest of the attention path is unchanged.
         if let cache = cache {
-            (k, v) = cache.update(keys: k, values: v)
+            if let qCache = cache as? QuantizedKVCache {
+                let (kQ, vQ) = qCache.updateQuantized(keys: k, values: v)
+                k = dequantized(kQ.0, scales: kQ.1, biases: kQ.2,
+                                groupSize: qCache.groupSize, bits: qCache.bits, mode: qCache.mode)
+                v = dequantized(vQ.0, scales: vQ.1, biases: vQ.2,
+                                groupSize: qCache.groupSize, bits: qCache.bits, mode: qCache.mode)
+            } else {
+                (k, v) = cache.update(keys: k, values: v)
+            }
         }
 
         // Scaled dot-product attention with GQA

@@ -652,7 +652,7 @@ public struct Qwen3TTSModelConfig: Codable, Sendable {
 
         // Load quantization from base config
         let baseConfig = try? BaseConfiguration(from: decoder)
-        self.quantization = baseConfig?.quantization
+        self.quantization = baseConfig?.perLayerQuantization?.quantization
         self.perLayerQuantization = baseConfig?.perLayerQuantization
     }
 

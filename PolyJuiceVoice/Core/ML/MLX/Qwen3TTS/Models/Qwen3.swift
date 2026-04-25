@@ -421,11 +421,27 @@ public class Qwen3TTSModel: Module {
     ///   - refText: Transcript of the reference audio
     ///   - language: Language code
     /// - Returns: (inputEmbeds, trailingTextHidden, ttsPadEmbed, refCodes)
+    /// Encode raw reference audio into codec codes [1, 16, ref_time].
+    /// Store the result (serialized via `VoiceEmbeddingCodec`) as
+    /// `Voice.embeddingData` to skip this step on repeat synthesis.
+    public func extractRefCodes(from referenceAudio: MLXArray) throws -> MLXArray {
+        guard let speechTokenizer = speechTokenizer, speechTokenizer.hasEncoder else {
+            throw Qwen3TTSError.modelNotInitialized("Speech tokenizer encoder not available")
+        }
+        var audio = referenceAudio
+        if audio.ndim == 1 { audio = audio.expandedDimensions(axes: [0, 1]) }
+        else if audio.ndim == 2 { audio = audio.expandedDimensions(axis: 0) }
+        let codes = try speechTokenizer.encode(audio)
+        eval(codes)
+        return codes
+    }
+
     private func prepareICLGenerationInputs(
         text: String,
         refAudio: MLXArray,
         refText: String,
-        language: String = "auto"
+        language: String = "auto",
+        preComputedRefCodes: MLXArray? = nil
     ) throws -> (inputEmbeds: MLXArray, trailingTextHidden: MLXArray, ttsPadEmbed: MLXArray, refCodes: MLXArray) {
         guard let tokenizer = self.tokenizer else {
             throw Qwen3TTSError.modelNotInitialized("Tokenizer not loaded")
@@ -439,15 +455,14 @@ public class Qwen3TTSModel: Module {
             throw Qwen3TTSError.modelNotInitialized("Speech tokenizer encoder not available")
         }
 
-        // 1. Encode reference audio -> ref_codes [1, 16, ref_time]
-        var audioForEncode = refAudio
-        if refAudio.ndim == 1 {
-            audioForEncode = refAudio.expandedDimensions(axes: [0, 1])  // [1, 1, samples]
-        } else if refAudio.ndim == 2 {
-            audioForEncode = refAudio.expandedDimensions(axis: 0)  // [1, 1, samples]
+        // 1. Encode reference audio -> ref_codes [1, 16, ref_time].
+        // Skip encoding when the caller supplies pre-computed codes (cached embedding).
+        let refCodes: MLXArray
+        if let cached = preComputedRefCodes {
+            refCodes = cached
+        } else {
+            refCodes = try extractRefCodes(from: refAudio)
         }
-        let refCodes = try speechTokenizer.encode(audioForEncode)  // [1, 16, ref_time]
-        eval(refCodes)
 
         // 2. Tokenize ref_text and target_text separately
         // ref_text format: <|im_start|>assistant\n{ref_text}<|im_end|>\n
@@ -638,12 +653,16 @@ public class Qwen3TTSModel: Module {
         var generatedCodes: [[MLXArray]] = []
         var generatedTokens: [Int] = []
 
+
         // Current input
         var currentInput = inputEmbeds
         var trailingIdx = 0
 
         // Autoregressive generation
         for _ in 0..<effectiveMaxTokens {
+            // Bail early on cancellation — this is what lets MLXTTSService
+            // tear down a synthesis when iOS signals memory pressure.
+            try Task.checkCancellation()
             // Forward through Talker.
             //
             // Note: we deliberately do NOT call eval(logits, hiddenStates) here.
@@ -678,6 +697,7 @@ public class Qwen3TTSModel: Module {
                 break
             }
             onToken?(tokenValue)
+
 
             // Generate remaining 15 codebooks using Code Predictor.
             // No per-step eval inside this loop — the codes stay lazy and get
@@ -861,12 +881,16 @@ public class Qwen3TTSModel: Module {
         var generatedCodes: [[MLXArray]] = []
         var generatedTokens: [Int] = []
 
+
         // Current input
         var currentInput = inputEmbeds
         var trailingIdx = 0
 
         // Autoregressive generation
         for _ in 0..<effectiveMaxTokens {
+            // Bail early on cancellation — this is what lets MLXTTSService
+            // tear down a synthesis when iOS signals memory pressure.
+            try Task.checkCancellation()
             // Forward through Talker.
             //
             // Note: we deliberately do NOT call eval(logits, hiddenStates) here.
@@ -901,6 +925,7 @@ public class Qwen3TTSModel: Module {
                 break
             }
             onToken?(tokenValue)
+
 
             // Generate remaining 15 codebooks using Code Predictor.
             // No per-step eval inside this loop — the codes stay lazy and get
@@ -1056,18 +1081,56 @@ public class Qwen3TTSModel: Module {
         maxTokens: Int = 2048,
         onToken: ((Int) -> Void)? = nil
     ) throws -> MLXArray {
-        // Voice cloning requires:
-        // 1. Speech tokenizer encoder to encode reference audio to codes
-        // 2. Speaker encoder for x-vector embedding
-
-        guard let talkerConfig = config.talkerConfig else {
-            throw Qwen3TTSError.modelNotInitialized("Talker config not available")
-        }
-
         guard let speechTokenizer = speechTokenizer else {
             throw Qwen3TTSError.modelNotInitialized("Speech tokenizer not loaded")
         }
+        let codes = try generateClonedVoiceCodes(
+            text: text,
+            referenceAudio: referenceAudio,
+            referenceText: referenceText,
+            language: language,
+            temperature: temperature,
+            topK: topK,
+            topP: topP,
+            repetitionPenalty: repetitionPenalty,
+            maxTokens: maxTokens,
+            onToken: onToken
+        )
+        return Self.decodeClonedVoiceAudio(codes, speechTokenizer: speechTokenizer)
+    }
 
+    /// Carries the materialized codec sequence out of the AR phase so the
+    /// service layer can place a memory-reclaim boundary before decode.
+    public struct ClonedVoiceCodesResult: @unchecked Sendable {
+        /// Combined [1, ref_time + gen_len, 16] codes, already eval'd.
+        public let fullCodes: MLXArray
+        public let refLen: Int
+        public let totalLen: Int
+    }
+
+    /// AR phase only. Runs the ICL setup, autoregressive generation, and
+    /// code stacking, then materialises `fullCodes` with `eval()`.
+    /// Call `decodeClonedVoiceAudio(_:speechTokenizer:)` with the result —
+    /// with a `GPU.clearCache()` in between on iOS — to complete synthesis.
+    public func generateClonedVoiceCodes(
+        text: String,
+        referenceAudio: MLXArray,
+        referenceText: String,
+        language: String = "auto",
+        temperature: Float = 0.9,
+        topK: Int = 50,
+        topP: Float = 1.0,
+        repetitionPenalty: Float = 1.5,
+        maxTokens: Int = 2048,
+        onToken: ((Int) -> Void)? = nil,
+        preComputedRefCodes: MLXArray? = nil
+    ) throws -> ClonedVoiceCodesResult {
+        guard let talkerConfig = config.talkerConfig else {
+            throw Qwen3TTSError.modelNotInitialized("Talker config not available")
+        }
+        guard let speechTokenizer = speechTokenizer else {
+            throw Qwen3TTSError.modelNotInitialized("Speech tokenizer not loaded")
+        }
         guard speechTokenizer.hasEncoder else {
             throw Qwen3TTSError.modelNotInitialized(
                 "Voice cloning (ICL mode) requires the speech tokenizer encoder. " +
@@ -1075,55 +1138,72 @@ public class Qwen3TTSModel: Module {
             )
         }
 
-        // 1. Prepare ICL inputs
+        // 1. Prepare ICL inputs (encoder skipped when preComputedRefCodes is set)
         let (inputEmbeds, trailingTextHidden, ttsPadEmbed, refCodes) = try prepareICLGenerationInputs(
             text: text,
             refAudio: referenceAudio,
             refText: referenceText,
-            language: language
+            language: language,
+            preComputedRefCodes: preComputedRefCodes
         )
 
+        // On iOS: encoder weights (~250 MB) are no longer needed after ICL setup.
+        // Freeing them here — before the AR loop allocates its KV cache and the
+        // decode phase builds its upsampling graph — is the single biggest
+        // available memory saving inside the model. The encoder is reloaded only
+        // when the full snapshot is reloaded.
+        #if os(iOS)
+        speechTokenizer.releaseEncoder()
+        GPU.clearCache()
+        #endif
+
         // Cap max_tokens based on target text length to prevent runaway generation
-        // At 12.5 Hz codec rate, ~3-5 codec tokens per text token is typical speech
-        // Factor of 6 gives ~50% margin for slow speech / pauses
         let targetTokenCount = tokenizer?.encode(text: text).count ?? text.count
         let effectiveMaxTokens = min(maxTokens, max(75, targetTokenCount * 6))
 
         // 2. Initialize cache and generation state
-        let cache = talker.makeCache()
+        var cache = talker.makeCache()
         var generatedCodes: [[MLXArray]] = []
         var generatedTokens: [Int] = []
         let eosTokenId = talkerConfig.codecEosTokenId
 
-        // Build suppress tokens list (special tokens except EOS)
         let vocabSize = talkerConfig.vocabSize
         var suppressTokens = [Int]()
         for i in (vocabSize - 1024)..<vocabSize {
-            if i != eosTokenId {
-                suppressTokens.append(i)
-            }
+            if i != eosTokenId { suppressTokens.append(i) }
         }
 
         var trailingIdx = 0
         var currentInput = inputEmbeds
+        #if os(iOS)
+        var cacheQuantized = false
+        #endif
 
-        // Get code predictor (required for generation)
         guard let codePredictor = talker.codePredictor else {
             throw Qwen3TTSError.modelNotInitialized("Code predictor not available")
         }
 
         // 3. Autoregressive generation
         for _ in 0..<effectiveMaxTokens {
-            // Forward through Talker
+            // Bail early on cancellation — this is what lets MLXTTSService
+            // tear down a synthesis when iOS signals memory pressure.
+            try Task.checkCancellation()
             let (logits, hiddenStates) = talker(currentInput, cache: cache)
             eval(logits, hiddenStates)
 
-            // Sample first codebook token
+            #if os(iOS)
+            // After the first step the full ICL prefill is resident in the cache.
+            // Convert to 4-bit QuantizedKVCache (~4× smaller footprint).
+            // TalkerAttention dequantizes on read so the attention math is unchanged.
+            if !cacheQuantized {
+                cache = cache.map { ($0 as? KVCacheSimple)?.toQuantized(groupSize: 64, bits: 4) ?? $0 }
+                cacheQuantized = true
+            }
+            #endif
+
             let nextToken = sampleToken(
                 logits,
-                temperature: temperature,
-                topK: topK,
-                topP: topP,
+                temperature: temperature, topK: topK, topP: topP,
                 repetitionPenalty: repetitionPenalty,
                 generatedTokens: generatedTokens,
                 suppressTokens: suppressTokens,
@@ -1131,58 +1211,35 @@ public class Qwen3TTSModel: Module {
             )
 
             let tokenValue = Int(nextToken[0, 0].item(Int32.self))
-
-            // Check for EOS
-            if tokenValue == eosTokenId {
-                break
-            }
+            if tokenValue == eosTokenId { break }
 
             generatedTokens.append(tokenValue)
             onToken?(tokenValue)
 
-            // Generate remaining codebook tokens with code predictor
             var codeTokens = [nextToken]
             let codeHidden = hiddenStates[0..., (-1)..., 0...]
-
             let codeCache = codePredictor.makeCache()
 
             for codeIdx in 0..<(talkerConfig.numCodeGroups - 1) {
                 let codeInput: MLXArray
                 if codeIdx == 0 {
-                    // Prefill: concatenate [hidden_state, code_0_embed]
                     let code0Embed = talker.getInputEmbeddings()(nextToken)
                     codeInput = MLX.concatenated([codeHidden, code0Embed], axis: 1)
                 } else {
-                    // Generation: just pass embedding of previous code token
                     let codeEmbed = codePredictor.codecEmbedding[codeIdx - 1](codeTokens[codeIdx])
                     codeInput = codeEmbed
                 }
-
-                // Code predictor forward
-                let (codeLogits, _, _) = codePredictor(
-                    codeInput,
-                    cache: codeCache,
-                    generationStep: codeIdx
-                )
-
-                // Sample
+                let (codeLogits, _, _) = codePredictor(codeInput, cache: codeCache, generationStep: codeIdx)
                 let nextCode = sampleToken(
                     codeLogits,
-                    temperature: temperature,
-                    topK: topK,
-                    topP: topP,
-                    repetitionPenalty: 1.0,
-                    generatedTokens: [],
-                    suppressTokens: nil,
-                    eosTokenId: nil
+                    temperature: temperature, topK: topK, topP: topP,
+                    repetitionPenalty: 1.0, generatedTokens: [], suppressTokens: nil, eosTokenId: nil
                 )
                 codeTokens.append(nextCode)
             }
 
-            // Stack all codebook tokens
             generatedCodes.append(codeTokens)
 
-            // Prepare next input
             let textEmbed: MLXArray
             if trailingIdx < trailingTextHidden.dim(1) {
                 textEmbed = trailingTextHidden[0..., trailingIdx..<(trailingIdx + 1), 0...]
@@ -1191,7 +1248,6 @@ public class Qwen3TTSModel: Module {
                 textEmbed = ttsPadEmbed
             }
 
-            // Build codec embedding for next step (sum of all codebook embeddings)
             var codecEmbed = talker.getInputEmbeddings()(nextToken)
             for (i, code) in codeTokens.dropFirst().enumerated() {
                 codecEmbed = codecEmbed + codePredictor.codecEmbedding[i](code)
@@ -1205,33 +1261,43 @@ public class Qwen3TTSModel: Module {
             throw Qwen3TTSError.generationFailed("No tokens generated")
         }
 
-        // 4. Stack generated codes: [batch, seq_len, num_code_groups]
+        // 4. Stack and materialise
         let genCodesStacked = MLX.stacked(
             generatedCodes.map { codes in MLX.concatenated(codes, axis: 1) },
             axis: 1
         )
-
-        // 5. Prepend reference codes for decoding
-        // ref_codes: [1, 16, ref_time] -> [1, ref_time, 16]
         let refCodesT = refCodes.transposed(0, 2, 1)
-        // Combine: [1, ref_time + gen_len, 16]
         let fullCodes = MLX.concatenated([refCodesT, genCodesStacked], axis: 1)
 
-        let refLen = refCodes.dim(2)
-        let totalLen = fullCodes.dim(1)
+        // Materialise before returning — breaks the lazy AR graph so the
+        // caller's GPU.clearCache() can reclaim KV cache / scratch buffers
+        // before the decode phase builds its Metal command buffer.
+        eval(fullCodes)
 
-        // 6. Decode full codes to audio
-        let (audio, audioLengths) = speechTokenizer.decode(fullCodes)
-        var audioOutput = audio[0]  // Remove batch dim
+        return ClonedVoiceCodesResult(
+            fullCodes: fullCodes,
+            refLen: refCodes.dim(2),
+            totalLen: fullCodes.dim(1)
+        )
+    }
 
-        // Trim to valid length
+    /// Decode phase. Takes the materialized codes from `generateClonedVoiceCodes`
+    /// and runs the speech-tokenizer decoder + audio trimming.
+    /// On iOS, call `GPU.clearCache()` between the two phases to reclaim
+    /// AR-loop Metal buffers before this allocates its upsampling graph.
+    public static func decodeClonedVoiceAudio(
+        _ result: ClonedVoiceCodesResult,
+        speechTokenizer: Qwen3TTSSpeechTokenizer
+    ) -> MLXArray {
+        let (audio, audioLengths) = speechTokenizer.decode(result.fullCodes)
+        var audioOutput = audio[0]
+
         let validLen = Int(audioLengths[0].item(Int32.self))
         if validLen > 0 && validLen < audioOutput.dim(0) {
             audioOutput = audioOutput[0..<validLen]
         }
 
-        // 7. Remove the reference audio portion using proportional trimming
-        let cut = Int(Float(refLen) / Float(max(totalLen, 1)) * Float(audioOutput.dim(0)))
+        let cut = Int(Float(result.refLen) / Float(max(result.totalLen, 1)) * Float(audioOutput.dim(0)))
         if cut > 0 && cut < audioOutput.dim(0) {
             audioOutput = audioOutput[cut...]
         }
@@ -1472,8 +1538,59 @@ public class Qwen3TTSModel: Module {
         let tokenMapKey = "talker.model.text_token_map"
         let textTokenMap = sanitizedWeights.removeValue(forKey: tokenMapKey)
 
+        // Lightweight runtime key audit — a handful of sentinel keys that
+        // must be present in every valid Qwen3-TTS snapshot. If a future
+        // mlx-community release renames tensors, this catches the mismatch
+        // at load time with a clear message instead of silent inference failure.
+        let sentinelKeys = [
+            "talker.model.text_embedding.weight",
+            "talker.model.layers.0.self_attn.q_proj.weight",
+            "talker.model.norm.weight",
+        ]
+        let missingKeys = sentinelKeys.filter { !sanitizedWeights.keys.contains($0) }
+        if !missingKeys.isEmpty {
+            AppLog.warning(
+                "Weight key audit: \(missingKeys.count) expected key(s) missing — " +
+                "[\(missingKeys.joined(separator: ", "))]. " +
+                "The mlx-community snapshot may have been updated with renamed tensors. " +
+                "Run WeightKeyAuditTests and update WeightKeyMap.swift if needed.",
+                "model"
+            )
+        }
+
         // Apply weights (allow unused keys for models with optional components)
         try model.update(parameters: ModuleParameters.unflattened(sanitizedWeights), verify: [])
+
+        // Free the safetensors-loaded weight dictionaries now that the model
+        // owns references to its parameters. Without this, both dicts hold the
+        // bf16 weights alongside the model until function return — doubling
+        // peak load RSS, which on iOS is the difference between the app
+        // surviving the load step or being killed by jetsam.
+        sanitizedWeights.removeAll()
+        weights.removeAll()
+
+        // Post-load embedding quantization. mlx-community ships the
+        // `talker.model.text_embedding` as bf16 in every quantization tier
+        // (q4..q8) — at [151936, 2048] that's 593 MB for the 0.6B model and
+        // 593+ MB for 1.7B, dwarfing the (already-quantized) Linear weights.
+        // Quantizing it post-load to match the model's int4/int8 precision
+        // reclaims ~520 MB / ~440 MB respectively. The .scales+.biases overhead
+        // is single-digit MB.
+        //
+        // Only runs when the safetensors didn't already contain quantized
+        // embeddings (i.e., quantizedEmbeddingPaths is empty). If a future
+        // mlx-community release ships them pre-quantized, the first quantize()
+        // pass handled it and this would be a no-op at best.
+        if let quantization = config.quantization, quantizedEmbeddingPaths.isEmpty {
+            quantize(
+                model: model,
+                groupSize: quantization.groupSize,
+                bits: quantization.bits,
+                mode: quantization.mode,
+                filter: { _, module in module is Embedding }
+            )
+            debugPrint("🔊 Post-load embedding quantization applied (\(quantization.bits)-bit)")
+        }
 
         // Assign token map after weight loading
         if let tokenMap = textTokenMap {

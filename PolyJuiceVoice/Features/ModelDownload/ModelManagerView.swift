@@ -174,8 +174,7 @@ struct ModelManagerView: View {
 
             if let active, ModelDownloadManager.isInstalled(active) {
                 Label {
-                    Text("Active: ") +
-                    Text("\(active.family.displayName) · \(active.precision.displayName)").fontWeight(.semibold)
+                    Text("Active: \(Text("\(active.family.displayName) · \(active.precision.displayName)").fontWeight(.semibold))")
                 } icon: {
                     Image(systemName: "checkmark.circle.fill")
                 }
@@ -213,7 +212,7 @@ struct ModelManagerView: View {
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            Text("Heads-up: 4-bit and 5-bit tiers can audibly degrade prosody for TTS. Listen before relying on them; bf16 is the reference precision.")
+            Text(precisionFooterHint)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -262,6 +261,19 @@ struct ModelManagerView: View {
             }
         }
         return buckets
+    }
+
+    private var precisionFooterHint: String {
+        #if os(iOS)
+        let physicalGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+        if physicalGB >= 6 {
+            return "8-bit is the recommended starting point on this device — near-lossless quality within memory limits. 6-bit also works well; 4-bit and 5-bit may audibly degrade prosody."
+        } else {
+            return "This device has \(Int(physicalGB.rounded())) GB RAM. Use 4-bit to stay within memory limits — 8-bit and higher may cause crashes on longer generations."
+        }
+        #else
+        return "Heads-up: 4-bit and 5-bit tiers can audibly degrade prosody for TTS. Listen before relying on them; bf16 is the reference precision."
+        #endif
     }
 
     private var totalBytes: Int64 {
@@ -327,12 +339,17 @@ private struct VariantCard: View, Equatable {
             return focusedPrecision
         }
         // Default focus: the user's active precision if it lives in this
-        // bucket, otherwise the highest quality available.
+        // bucket, otherwise the platform-appropriate default, otherwise
+        // whatever quality tier is available.
         if let active = activeSnapshot,
            active.family == family,
            active.capability == snapshotCapability,
            candidates.contains(where: { $0.precision == active.precision }) {
             return active.precision
+        }
+        let platformPref = ModelPrecision.platformDefault
+        if candidates.contains(where: { $0.precision == platformPref }) {
+            return platformPref
         }
         return candidates.first?.precision ?? .bf16
     }
@@ -341,6 +358,25 @@ private struct VariantCard: View, Equatable {
         candidates.first { $0.precision == resolvedFocus }
             ?? candidates.first
             ?? ModelSnapshot(family: family, capability: snapshotCapability, precision: .bf16)
+    }
+
+    /// Non-nil on iOS when this 1.7B card is shown on a device whose RAM
+    /// cannot reliably host the model. Nil on macOS (always) and on iOS
+    /// devices with > 8 GB RAM (iPad Pro M-series).
+    private var iOSMemoryWarning: String? {
+        #if os(iOS)
+        guard family == .b17 else { return nil }
+        let physicalGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+        guard physicalGB <= 8 else { return nil }
+        switch snapshotCapability {
+        case .base:
+            return "1.7B Voice Cloning is only available in bf16 (~3.6 GB) and will exceed this device's memory budget. Use 0.6B Base for reliable cloning on iPhone and iPad."
+        case .customVoice, .voiceDesign:
+            return "1.7B at bf16 needs ~3.6 GB GPU memory. On this device use 8-bit or lower — the pill above defaults to the recommended tier."
+        }
+        #else
+        return nil
+        #endif
     }
 
     var body: some View {
@@ -352,6 +388,12 @@ private struct VariantCard: View, Equatable {
         VStack(alignment: .leading, spacing: 14) {
             header(isActive: isActive)
             precisionPills
+            if let warning = iOSMemoryWarning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             details(snapshot: snapshot, state: state, diskUsage: usage, isActive: isActive)
 
             if case .downloading(let progress, let file, let bps, let eta) = state {

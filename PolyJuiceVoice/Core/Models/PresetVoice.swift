@@ -5,18 +5,12 @@
 
 import Foundation
 
+/// Built-in preset speakers shipped with the model.
+/// rawValue must match a key in talkerConfig.spkId (case-insensitive).
+/// Available model speakers: vivian, ono_anna, aiden, serena, sohee, uncle_fu, eric, ryan, dylan
 enum PresetVoice: String, CaseIterable, Codable, Sendable {
     case ryan = "Ryan"
-    case sara = "Sara"
-    case kai = "Kai"
-    case emma = "Emma"
-
-    var embeddingId: Int {
-        switch self {
-        case .ryan: return 1001
-        case .sara: return 1002
-        case .kai: return 1003
-        case .emma: return 1004
-        }
-    }
+    case vivian = "Vivian"
+    case aiden = "Aiden"
+    case serena = "Serena"
 }

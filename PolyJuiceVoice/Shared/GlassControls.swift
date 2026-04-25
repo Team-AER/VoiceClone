@@ -9,6 +9,9 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Field labels
 
@@ -75,7 +78,12 @@ struct PrimaryActionButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            #if os(iOS)
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            #endif
+            action()
+        } label: {
             HStack(spacing: 10) {
                 if isWorking {
                     ProgressView()

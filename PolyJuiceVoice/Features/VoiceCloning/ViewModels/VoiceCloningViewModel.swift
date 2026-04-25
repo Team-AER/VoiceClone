@@ -50,8 +50,7 @@ final class VoiceCloningViewModel: ObservableObject {
         !targetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !referenceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         hasReferenceAudio &&
-        !isSynthesizing &&
-        ttsService?.state == .ready
+        !isSynthesizing
     }
 
     func setup(ttsService: MLXTTSService,
@@ -65,7 +64,7 @@ final class VoiceCloningViewModel: ObservableObject {
         self.downloadManager = downloadManager
         self.selectionStore = selectionStore
 
-        await loadCapability()
+        refreshUnconfiguredCapability()
 
         recorder.$isRecording
             .receive(on: DispatchQueue.main)
@@ -114,10 +113,7 @@ final class VoiceCloningViewModel: ObservableObject {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self else { return }
-                if self.unconfiguredCapability != nil {
-                    Task { await self.loadCapability() }
-                }
+                self?.refreshUnconfiguredCapability()
             }
             .store(in: &cancellables)
 
@@ -125,9 +121,19 @@ final class VoiceCloningViewModel: ObservableObject {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                Task { await self?.loadCapability() }
+                self?.refreshUnconfiguredCapability()
             }
             .store(in: &cancellables)
+    }
+
+    private func refreshUnconfiguredCapability() {
+        guard let store = selectionStore else { return }
+        if let snap = store.selected(for: .voiceClone),
+           ModelDownloadManager.isInstalled(snap) {
+            unconfiguredCapability = nil
+        } else {
+            unconfiguredCapability = .voiceClone
+        }
     }
 
     func retrySetup() {
@@ -192,21 +198,23 @@ final class VoiceCloningViewModel: ObservableObject {
         // prevents "Capability not loaded: voiceClone" errors when the user
         // records, types, and taps Clone before setup completes.
         guard let store = selectionStore else { return }
+        isSynthesizing = true
         do {
             try await tts.loadCapability(.voiceClone, using: store)
             unconfiguredCapability = nil
         } catch TTSError.capabilityNotConfigured {
             unconfiguredCapability = .voiceClone
+            isSynthesizing = false
             return
         } catch TTSError.snapshotNotInstalled {
             unconfiguredCapability = .voiceClone
+            isSynthesizing = false
             return
         } catch {
             self.error = error.localizedDescription
+            isSynthesizing = false
             return
         }
-
-        isSynthesizing = true
         canSaveVoice = false
         generatedChunks = []
         generatedSamples = []
@@ -284,6 +292,23 @@ final class VoiceCloningViewModel: ObservableObject {
             canSaveVoice = false
         } catch {
             self.error = error.localizedDescription
+            return
+        }
+
+        // Extract and persist the voice embedding so repeat synthesis in the
+        // Voice Library skips the speech-tokenizer encoder step (~200–400 ms
+        // saved per call, ~250 MB peak memory avoided on iOS).
+        let voiceID = voice.id
+        let refData = try? await storage.referenceAudioData(for: voiceID)
+        if let refData, let model = ttsService?.currentModel {
+            Task.detached(priority: .utility) { [weak storage] in
+                guard let embedding = try? MLXTTSService.extractVoiceEmbedding(
+                    model: model,
+                    referenceAudio: refData
+                ) else { return }
+                try? await storage?.updateEmbedding(embedding, for: voiceID)
+                AppLog.info("Voice embedding cached for \(voiceID).", "cloning")
+            }
         }
     }
 

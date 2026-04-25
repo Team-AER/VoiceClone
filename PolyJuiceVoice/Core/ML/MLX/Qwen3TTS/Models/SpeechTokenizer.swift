@@ -512,8 +512,8 @@ public class DecoderTransformerAttention: Module {
     public func callAsFunction(_ x: MLXArray, mask: MLXArray?) -> MLXArray {
         let (B, L, _) = (x.dim(0), x.dim(1), x.dim(2))
 
-        var q = qProj(x).reshaped(B, L, numHeads, headDim).transposed(0, 2, 1, 3)
-        var k = kProj(x).reshaped(B, L, numKVHeads, headDim).transposed(0, 2, 1, 3)
+        let q = qProj(x).reshaped(B, L, numHeads, headDim).transposed(0, 2, 1, 3)
+        let k = kProj(x).reshaped(B, L, numKVHeads, headDim).transposed(0, 2, 1, 3)
         let v = vProj(x).reshaped(B, L, numKVHeads, headDim).transposed(0, 2, 1, 3)
 
         let output = MLXFast.scaledDotProductAttention(
@@ -763,6 +763,14 @@ public class Qwen3TTSSpeechTokenizerDecoder: Module {
         hidden = preTransformer(hidden)
         hidden = hidden.transposed(0, 2, 1)  // [batch, latent_dim, time]
 
+        // iOS: stage boundary after the attention-heavy pre-transformer.
+        // The transformer's self-attention on hundreds of frames produces a
+        // very wide compute graph. Materialising here keeps the next Metal
+        // command buffer (transposed-conv upsampling) separate and smaller.
+        #if os(iOS)
+        eval(hidden)
+        #endif
+
         // 4. Upsampling (4x)
         for layers in upsample {
             for layer in layers {
@@ -773,6 +781,14 @@ public class Qwen3TTSSpeechTokenizerDecoder: Module {
                 }
             }
         }
+
+        // iOS: stage boundary before the main decoder's 480x upsample chain.
+        // Separates the latentDim=1024 transposed-conv upsamplers from the
+        // multi-stage 8/5/4/3 audio upsampling — each becomes its own
+        // command buffer.
+        #if os(iOS)
+        eval(hidden)
+        #endif
 
         // 5. Main decoder (480x)
         var wav = mainDecoder(hidden)
@@ -845,6 +861,24 @@ public class Qwen3TTSSpeechTokenizer: Module {
             throw Qwen3TTSSpeechTokenizerError.encoderNotAvailable
         }
         return encoder.encode(audio)
+    }
+
+    /// Drop the encoder weights from Metal memory. Safe to call after
+    /// refCodes have been extracted — the decoder doesn't need the encoder.
+    /// The encoder is reloaded only when the full model is reloaded.
+    ///
+    /// Must go through `update(modules:)` rather than mutating
+    /// `_encoder.wrappedValue` directly: MLXNN's @ModuleInfo setter fatal-
+    /// errors on transitions away from a non-nil module ("please use
+    /// Model.update(modules:) rather than mutating the Module property
+    /// directly"). The `.none` mapping resolves to the `(.value(.module),
+    /// .none)` case in `apply(...)` inside Module.update(modules:), which
+    /// goes through the type-erased setter — the supported path for
+    /// nil-ing out an optional child module.
+    public func releaseEncoder() {
+        guard _encoder.wrappedValue != nil else { return }
+        let nilEntry: [String: NestedItem<String, Module>] = ["encoder": .none]
+        update(modules: ModuleChildren(values: nilEntry))
     }
 
     /// Initialize encoder codebooks after loading weights

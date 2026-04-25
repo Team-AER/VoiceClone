@@ -463,7 +463,7 @@ private func hannWindow(_ size: Int) -> MLXArray {
 
 /// Compute Short-Time Fourier Transform
 private func computeSTFT(_ x: MLXArray, nFft: Int, hopSize: Int, window: MLXArray) -> MLXArray {
-    let (batch, samples) = (x.dim(0), x.dim(1))
+    let (_, samples) = (x.dim(0), x.dim(1))
 
     // Calculate number of frames
     let numFrames = (samples - nFft) / hopSize + 1

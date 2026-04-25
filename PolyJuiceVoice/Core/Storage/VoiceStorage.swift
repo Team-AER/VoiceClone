@@ -91,6 +91,14 @@ actor VoiceStorage {
         }
     }
 
+    /// Persist the serialized refCodes blob for a voice that was previously
+    /// saved without an embedding. Called after the first synthesis so future
+    /// calls skip the speech-tokenizer encoder step.
+    func updateEmbedding(_ data: Data, for voiceID: UUID) throws {
+        let url = voicesDirectory.appendingPathComponent("\(voiceID).embedding")
+        try data.write(to: url)
+    }
+
     /// Load the on-disk reference audio bytes for a saved voice.
     /// Returns nil when the voice has no reference recording (e.g. an
     /// instruction-only "designed" voice).

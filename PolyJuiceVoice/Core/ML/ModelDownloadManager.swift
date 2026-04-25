@@ -86,9 +86,26 @@ final class ModelDownloadManager: NSObject, ObservableObject {
     /// glass cards at that rate, killing scroll responsiveness.
     private static let uiPublishInterval: TimeInterval = 0.15
 
+    /// Stored by AppDelegate when the system wakes the app to deliver
+    /// background-session events. Called inside `urlSessionDidFinishEvents`.
+    nonisolated(unsafe) static var pendingBackgroundCompletion: (() -> Void)?
+
     override init() {
         super.init()
+        #if os(iOS)
+        // Background session: the OS daemon owns the actual TCP transfer so
+        // large downloads (3.6 GB talker weights) continue even when the app
+        // is backgrounded or suspended. The app is relaunched in the background
+        // when all transfers finish; AppDelegate stores the completion handler
+        // and we call it from urlSessionDidFinishEvents below.
+        let config = URLSessionConfiguration.background(
+            withIdentifier: "com.polyjuice.modeldownload.v1"
+        )
+        config.isDiscretionary = false
+        config.sessionSendsLaunchEvents = true
+        #else
         let config = URLSessionConfiguration.default
+        #endif
         config.timeoutIntervalForResource = 3600
         config.waitsForConnectivity = true
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
@@ -560,6 +577,15 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
             guard let mapping = self.taskRegistry[taskId] else { return }
             self.failSnapshot(mapping.snapshot, reason: message)
         }
+    }
+
+    /// Called by the system on iOS after all background-session events have
+    /// been delivered. Signal the completion handler so the OS knows we've
+    /// processed the wake-up and can snapshot the app again.
+    nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        let handler = Self.pendingBackgroundCompletion
+        Self.pendingBackgroundCompletion = nil
+        DispatchQueue.main.async { handler?() }
     }
 
     // MARK: - State transitions (main-actor)

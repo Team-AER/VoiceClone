@@ -76,8 +76,7 @@ final class SynthesisViewModel: ObservableObject {
     var canSynthesize: Bool {
         unconfiguredCapability == nil &&
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !isSynthesizing &&
-        ttsService?.state == .ready
+        !isSynthesizing
     }
 
     func setup(ttsService: MLXTTSService,
@@ -92,21 +91,19 @@ final class SynthesisViewModel: ObservableObject {
         self.selectionStore = selectionStore
 
         await reloadVoiceOptions()
-        await loadCapabilityForSelection()
+        refreshUnconfiguredCapability()
 
         ttsService.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 switch state {
-                case .synthesizing:
+                case .loading, .synthesizing:
                     self?.isSynthesizing = true
-                case .ready:
+                case .ready, .idle:
                     self?.isSynthesizing = false
                 case .error(let msg):
                     self?.error = msg
                     self?.isSynthesizing = false
-                default:
-                    break
                 }
             }
             .store(in: &cancellables)
@@ -130,16 +127,12 @@ final class SynthesisViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Re-attempt capability load whenever a snapshot finishes downloading
-        // OR the user changes their per-capability selection.
+        // Refresh UI gate whenever a snapshot finishes downloading.
         downloadManager.$snapshotStates
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self else { return }
-                if self.unconfiguredCapability != nil {
-                    Task { await self.loadCapabilityForSelection() }
-                }
+                self?.refreshUnconfiguredCapability()
             }
             .store(in: &cancellables)
 
@@ -327,11 +320,14 @@ final class SynthesisViewModel: ObservableObject {
                         "Saved voice \"\(voice.name)\" is missing its reference recording."
                     )
                 }
+                // Use the pre-computed refCodes blob when available — skips the
+                // speech-tokenizer encoder step (~200–400 ms, ~250 MB peak on iOS).
                 return try await tts.synthesize(
                     text: text,
                     language: language,
                     referenceAudio: refData,
-                    referenceText: voice.instruction ?? ""
+                    referenceText: voice.instruction ?? "",
+                    preComputedEmbedding: voice.embeddingData
                 )
             }
         }

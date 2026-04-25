@@ -28,7 +28,19 @@ enum TextChunker {
     /// Default chunk cap. Tuned so a sentence stays under ~12 seconds of
     /// audio (well under the model's 1200-token default `maxTokens`), while
     /// still being long enough to keep prosody natural.
+    ///
+    /// iOS uses a tighter cap because the speech-tokenizer decoder's
+    /// upsampling cascade (480× from codec frames to 24 kHz audio) allocates
+    /// proportionally to chunk-token-count, and on a tight memory budget the
+    /// peak inside `mainDecoder()` is what pushes the process over jetsam.
+    /// 120 chars ≈ ~3-4 sec of audio per chunk, which keeps the decoder
+    /// activations small enough to fit even when the embeddings + speech
+    /// tokenizer are still resident.
+    #if os(iOS)
+    static let defaultMaxCharacters = 120
+    #else
     static let defaultMaxCharacters = 220
+    #endif
 
     /// Split `text` into chunks of at most `maxCharacters` characters,
     /// preferring sentence boundaries (then commas, then word boundaries).

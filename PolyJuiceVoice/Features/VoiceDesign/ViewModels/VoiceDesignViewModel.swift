@@ -42,8 +42,7 @@ final class VoiceDesignViewModel: ObservableObject {
         unconfiguredCapability == nil &&
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !isSynthesizing &&
-        ttsService?.state == .ready
+        !isSynthesizing
     }
 
     func setup(ttsService: MLXTTSService,
@@ -57,21 +56,19 @@ final class VoiceDesignViewModel: ObservableObject {
         self.downloadManager = downloadManager
         self.selectionStore = selectionStore
 
-        await loadCapability()
+        refreshUnconfiguredCapability()
 
         ttsService.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 switch state {
-                case .synthesizing:
+                case .loading, .synthesizing:
                     self?.isSynthesizing = true
-                case .ready:
+                case .ready, .idle:
                     self?.isSynthesizing = false
                 case .error(let msg):
                     self?.error = msg
                     self?.isSynthesizing = false
-                default:
-                    break
                 }
             }
             .store(in: &cancellables)
@@ -102,10 +99,7 @@ final class VoiceDesignViewModel: ObservableObject {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self else { return }
-                if self.unconfiguredCapability != nil {
-                    Task { await self.loadCapability() }
-                }
+                self?.refreshUnconfiguredCapability()
             }
             .store(in: &cancellables)
 
@@ -113,9 +107,19 @@ final class VoiceDesignViewModel: ObservableObject {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                Task { await self?.loadCapability() }
+                self?.refreshUnconfiguredCapability()
             }
             .store(in: &cancellables)
+    }
+
+    private func refreshUnconfiguredCapability() {
+        guard let store = selectionStore else { return }
+        if let snap = store.selected(for: .voiceDesign),
+           ModelDownloadManager.isInstalled(snap) {
+            unconfiguredCapability = nil
+        } else {
+            unconfiguredCapability = .voiceDesign
+        }
     }
 
     /// Re-attempt model load — call after the user dismisses the Model

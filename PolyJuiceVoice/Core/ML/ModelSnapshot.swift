@@ -118,6 +118,21 @@ enum ModelPrecision: String, CaseIterable, Hashable, Sendable, Codable {
         }
     }
 
+    /// The best default precision for the current platform and device RAM.
+    /// macOS can comfortably run bf16. On iOS jetsam limits vary by device:
+    ///   ≥ 8 GB RAM (iPhone 15 Pro Max, iPad Pro M-series): q8
+    ///   ≥ 6 GB RAM (iPhone 14 Pro, iPhone 15): q8
+    ///   < 6 GB RAM (older iPhones, 4 GB devices): q4
+    static var platformDefault: ModelPrecision {
+        #if os(iOS)
+        let physicalBytes = ProcessInfo.processInfo.physicalMemory
+        let physicalGB = Double(physicalBytes) / 1_073_741_824  // bytes → GiB
+        return physicalGB >= 6 ? .q8 : .q4
+        #else
+        return .bf16
+        #endif
+    }
+
     /// Higher = better quality. Used only for sorting in the UI.
     var qualityRank: Int {
         switch self {
