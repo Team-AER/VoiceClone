@@ -197,6 +197,18 @@ final class SynthesisViewModel: ObservableObject {
     func synthesize() async {
         guard let tts = ttsService else { return }
 
+        // Pre-flight: sanitize and validate the input. Reject empty / control-
+        // char-only / over-the-cap text before we burn cycles on a load.
+        let result = TextSanitizer.sanitize(text)
+        guard let cleaned = result.sanitized else {
+            self.error = result.message
+            return
+        }
+        if case .warning(_, let warningMsg) = result {
+            AppLog.info(warningMsg, "synthesis")
+        }
+        self.text = cleaned
+
         // Make sure the snapshot for the selected voice is loaded before we
         // try to synthesize. Selecting a saved cloned voice triggers a Base
         // snapshot swap (~1.8 GB → ~5 s) that previously raced with the

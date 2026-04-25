@@ -59,9 +59,25 @@ final class MLXTTSService: ObservableObject {
 
     // MARK: - Init
 
+    private var memoryPressureObserver: NSObjectProtocol?
+
     init(audioEngine: AudioEngine) {
         self.audioEngine = audioEngine
+        // React to OS memory warnings (iOS) / explicit pressure events:
+        // drop the model and clear MLX caches so the app survives.
+        self.memoryPressureObserver = NotificationCenter.default.addObserver(
+            forName: .appMemoryPressure,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                AppLog.warning("Memory pressure — unloading model and clearing GPU cache.", "synthesis")
+                self?.unloadModel()
+            }
+        }
     }
+
+    // NotificationCenter.default holds observers weakly — no deinit cleanup needed.
 
     // MARK: - Capability loading
 
@@ -472,10 +488,10 @@ final class MLXTTSService: ObservableObject {
         lastSynthesisDuration = elapsed
         lastSynthesisPeakGPUBytes = peak
         let mb = Double(peak) / (1024.0 * 1024.0)
-        print(String(
-            format: "🎙️ synthesis done in %.2fs over %d chunks — GPU peak %.1f MB",
+        AppLog.notice(String(
+            format: "synthesis done in %.2fs over %d chunks — GPU peak %.1f MB",
             elapsed, lastSynthesisChunkCount, mb
-        ))
+        ), "synthesis")
     }
 
     // MARK: - Reference audio decoding

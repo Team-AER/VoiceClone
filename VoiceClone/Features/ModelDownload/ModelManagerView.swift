@@ -2,8 +2,9 @@
 //  ModelManagerView.swift
 //  VoiceClone
 //
-//  Per-snapshot download UI for the optional model variants (Base, VoiceDesign).
-//  Reachable from each feature tab when its required snapshot is missing.
+//  Per-snapshot download / delete UI for the optional model variants
+//  (Base, VoiceDesign). Reachable from each feature tab when its required
+//  snapshot is missing, and from Settings → Model Storage.
 //
 
 import SwiftUI
@@ -17,16 +18,36 @@ struct ModelManagerView: View {
     /// e.g. tapping "Download model" on the Clone tab opens with Base focused.
     var highlight: ModelSnapshot?
 
+    @State private var snapshotPendingDelete: ModelSnapshot?
+
     var body: some View {
         NavigationStack {
-            List(ModelSnapshot.allCases) { snapshot in
-                SnapshotRow(snapshot: snapshot,
+            List {
+                Section {
+                    ForEach(ModelSnapshot.allCases) { snapshot in
+                        SnapshotRow(
+                            snapshot: snapshot,
                             state: downloadManager.snapshotStates[snapshot] ?? .absent,
-                            isHighlighted: snapshot == highlight) {
-                    downloadManager.startDownload(of: snapshot)
+                            diskUsage: downloadManager.snapshotDiskUsage[snapshot] ?? 0,
+                            isHighlighted: snapshot == highlight,
+                            download: { downloadManager.startDownload(of: snapshot) },
+                            delete: { snapshotPendingDelete = snapshot }
+                        )
+                    }
+                } header: {
+                    Text("Available models")
+                } footer: {
+                    Text("Models are downloaded from Hugging Face and stored on this device. Voice cloning needs the Base model; designing voices needs Voice Design.")
+                        .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Model Manager")
+            #if os(macOS)
+            .listStyle(.inset)
+            #else
+            .listStyle(.insetGrouped)
+            #endif
+            .scrollContentBackground(.hidden)
+            .navigationTitle("Models")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -36,10 +57,30 @@ struct ModelManagerView: View {
                 }
             }
             .onAppear { downloadManager.rescan() }
+            .alert("Delete \(snapshotPendingDelete?.displayName ?? "model")?",
+                   isPresented: deleteAlertBinding,
+                   presenting: snapshotPendingDelete) { snapshot in
+                Button("Delete", role: .destructive) {
+                    downloadManager.delete(snapshot)
+                    snapshotPendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    snapshotPendingDelete = nil
+                }
+            } message: { snapshot in
+                Text("This frees \(DiskSpace.format(downloadManager.snapshotDiskUsage[snapshot] ?? 0)) on this device. You can re-download anytime.")
+            }
         }
         #if os(macOS)
-        .frame(minWidth: 540, minHeight: 420)
+        .frame(minWidth: 560, minHeight: 460)
         #endif
+    }
+
+    private var deleteAlertBinding: Binding<Bool> {
+        Binding(
+            get: { snapshotPendingDelete != nil },
+            set: { if !$0 { snapshotPendingDelete = nil } }
+        )
     }
 }
 
@@ -47,11 +88,13 @@ private struct SnapshotRow: View {
 
     let snapshot: ModelSnapshot
     let state: SnapshotInstallState
+    let diskUsage: Int64
     let isHighlighted: Bool
-    let action: () -> Void
+    let download: () -> Void
+    let delete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(snapshot.displayName)
@@ -65,8 +108,8 @@ private struct SnapshotRow: View {
                 statusBadge
             }
 
-            HStack(spacing: 8) {
-                Label(humanReadableSize, systemImage: "internaldrive")
+            HStack(spacing: 10) {
+                Label(metaSizeText, systemImage: "internaldrive")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
                 if snapshot.isRequired {
@@ -78,31 +121,62 @@ private struct SnapshotRow: View {
                 actionButton
             }
 
-            if case .downloading(let progress, let file) = state {
-                VStack(alignment: .leading, spacing: 4) {
+            if case .downloading(let progress, let file, let bps, let eta) = state {
+                VStack(alignment: .leading, spacing: 6) {
                     ProgressView(value: progress)
-                    Text("\(Int(progress * 100))% — \(URL(fileURLWithPath: file).lastPathComponent)")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text("\(Int(progress * 100))% — \(URL(fileURLWithPath: file).lastPathComponent)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Text(throughputAndEta(bps: bps, eta: eta))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
 
             if case .failed(let message) = state {
-                Text(message)
+                Label(message, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, 6)
-        .background(isHighlighted ? Color.accentColor.opacity(0.08) : .clear)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.vertical, 8)
+        .padding(.horizontal, isHighlighted ? 12 : 0)
+        .background {
+            if isHighlighted {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.tint.opacity(0.12))
+            }
+        }
     }
 
-    private var humanReadableSize: String {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: snapshot.approxBytes)
+    private var metaSizeText: String {
+        if state.isInstalled, diskUsage > 0 {
+            return DiskSpace.format(diskUsage)
+        }
+        return DiskSpace.format(snapshot.approxBytes)
+    }
+
+    private func throughputAndEta(bps: Double, eta: Double?) -> String {
+        let bpsStr = bps > 0 ? "\(DiskSpace.format(Int64(bps)))/s" : "starting…"
+        guard let eta else { return bpsStr }
+        return "\(bpsStr) • \(formatETA(eta)) left"
+    }
+
+    private func formatETA(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        if total < 60 { return "\(total)s" }
+        let minutes = total / 60
+        let secs = total % 60
+        if minutes < 60 { return "\(minutes)m \(secs)s" }
+        let hours = minutes / 60
+        let mins = minutes % 60
+        return "\(hours)h \(mins)m"
     }
 
     @ViewBuilder
@@ -112,14 +186,17 @@ private struct SnapshotRow: View {
             Label("Installed", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .font(.caption)
+                .labelStyle(.titleAndIcon)
         case .downloading:
             Label("Downloading", systemImage: "arrow.down.circle")
                 .foregroundStyle(.tint)
                 .font(.caption)
+                .labelStyle(.titleAndIcon)
         case .failed:
             Label("Failed", systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
                 .font(.caption)
+                .labelStyle(.titleAndIcon)
         case .checking, .absent:
             EmptyView()
         }
@@ -128,17 +205,28 @@ private struct SnapshotRow: View {
     @ViewBuilder
     private var actionButton: some View {
         switch state {
-        case .absent, .failed:
-            Button(state == .absent ? "Download" : "Retry", action: action)
-                .buttonStyle(.bordered)
+        case .absent:
+            Button("Download", systemImage: "arrow.down.circle", action: download)
+                .buttonStyle(.glassProminent)
                 .controlSize(.small)
+                .labelStyle(.titleOnly)
+        case .failed:
+            Button("Retry", systemImage: "arrow.clockwise", action: download)
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .labelStyle(.titleOnly)
         case .downloading:
             Button("Downloading…") {}
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .controlSize(.small)
                 .disabled(true)
         case .installed:
-            EmptyView()
+            Button("Delete", systemImage: "trash", role: .destructive, action: delete)
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .labelStyle(.titleOnly)
+                .disabled(snapshot.isRequired)
+                .help(snapshot.isRequired ? "The required model can't be deleted while the app is in use." : "Remove this model and free disk space.")
         case .checking:
             ProgressView().controlSize(.small)
         }

@@ -42,11 +42,13 @@ public class Qwen3TTSModel: Module {
     /// Text tokenizer (HuggingFace)
     public var tokenizer: Tokenizer?
 
-    public init(_ config: Qwen3TTSModelConfig) {
+    public init(_ config: Qwen3TTSModelConfig) throws {
         self.config = config
 
         guard let talkerConfig = config.talkerConfig else {
-            fatalError("Talker config is required")
+            throw Qwen3TTSError.modelNotInitialized(
+                "Talker config is missing from config.json — model directory is incomplete or the file is corrupt."
+            )
         }
 
         self.talker = Qwen3TTSTalkerForConditionalGeneration(talkerConfig)
@@ -261,13 +263,17 @@ public class Qwen3TTSModel: Module {
         language: String = "auto",
         speaker: String? = nil,
         instruct: String? = nil
-    ) -> (inputEmbeds: MLXArray, trailingTextHidden: MLXArray, ttsPadEmbed: MLXArray) {
+    ) throws -> (inputEmbeds: MLXArray, trailingTextHidden: MLXArray, ttsPadEmbed: MLXArray) {
         guard let tokenizer = self.tokenizer else {
-            fatalError("Tokenizer not loaded")
+            throw Qwen3TTSError.modelNotInitialized(
+                "Text tokenizer is not loaded. The model directory may be missing tokenizer.json."
+            )
         }
 
         guard let talkerConfig = config.talkerConfig else {
-            fatalError("Talker config not available")
+            throw Qwen3TTSError.modelNotInitialized(
+                "Talker config is not available — config.json is corrupt or missing fields."
+            )
         }
 
         // 1. Tokenize text
@@ -604,7 +610,7 @@ public class Qwen3TTSModel: Module {
         }
 
         // Prepare inputs (no speaker for VoiceDesign mode)
-        let (inputEmbeds, trailingTextHidden, ttsPadEmbed) = prepareGenerationInputs(
+        let (inputEmbeds, trailingTextHidden, ttsPadEmbed) = try prepareGenerationInputs(
             text: text,
             language: language,
             speaker: nil,
@@ -827,7 +833,7 @@ public class Qwen3TTSModel: Module {
         }
 
         // Prepare inputs with speaker
-        let (inputEmbeds, trailingTextHidden, ttsPadEmbed) = prepareGenerationInputs(
+        let (inputEmbeds, trailingTextHidden, ttsPadEmbed) = try prepareGenerationInputs(
             text: text,
             language: language,
             speaker: speaker,
@@ -1438,7 +1444,7 @@ public class Qwen3TTSModel: Module {
         )
 
         // Create model
-        let model = Qwen3TTSModel(config)
+        let model = try Qwen3TTSModel(config)
 
         // Quantize model layers to match weight format
         if let quantization = config.quantization {
@@ -1499,7 +1505,7 @@ public class Qwen3TTSModel: Module {
             let tokenizerConfig = try JSONDecoder().decode(Qwen3TTSTokenizerConfig.self, from: configData)
 
             // Create tokenizer
-            let tokenizer = Qwen3TTSSpeechTokenizer(tokenizerConfig)
+            let tokenizer = try Qwen3TTSSpeechTokenizer(tokenizerConfig)
 
             // Load weights
             var tokenizerWeights: [String: MLXArray] = [:]

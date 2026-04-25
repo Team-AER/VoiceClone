@@ -794,14 +794,16 @@ public class Qwen3TTSSpeechTokenizer: Module {
     @ModuleInfo(key: "decoder") var decoder: Qwen3TTSSpeechTokenizerDecoder
     @ModuleInfo(key: "encoder") var encoder: Qwen3TTSSpeechTokenizerEncoder?
 
-    public init(_ config: Qwen3TTSTokenizerConfig) {
+    public init(_ config: Qwen3TTSTokenizerConfig) throws {
         self.decodeUpsampleRate = config.decodeUpsampleRate
         self.encodeDownsampleRate = config.encodeDownsampleRate
 
         if let decoderConfig = config.decoderConfig {
             self._decoder.wrappedValue = Qwen3TTSSpeechTokenizerDecoder(decoderConfig)
         } else {
-            fatalError("Decoder config is required")
+            throw Qwen3TTSError.modelNotInitialized(
+                "Speech tokenizer decoder config is missing — speech_tokenizer/config.json is corrupt or incomplete."
+            )
         }
 
         // Initialize encoder if config is available

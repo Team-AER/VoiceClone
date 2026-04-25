@@ -157,6 +157,20 @@ final class VoiceCloneViewModel: ObservableObject {
     func synthesize() async {
         guard let tts = ttsService, let audioData = referenceAudioData else { return }
 
+        // Pre-flight: validate target text + reference transcript.
+        let targetResult = TextSanitizer.sanitize(targetText)
+        guard let cleanedTarget = targetResult.sanitized else {
+            self.error = targetResult.message
+            return
+        }
+        let refResult = TextSanitizer.sanitize(referenceText)
+        guard let cleanedRef = refResult.sanitized else {
+            self.error = "Reference transcript: " + (refResult.message ?? "invalid")
+            return
+        }
+        self.targetText = cleanedTarget
+        self.referenceText = cleanedRef
+
         // Defensive: ensure the Base snapshot is loaded. Idempotent when
         // already loaded. Same race-fix as the Speak tab: prevents
         // "Capability not loaded: voiceClone" errors when the user records,

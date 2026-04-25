@@ -100,6 +100,43 @@ actor VoiceStorage {
         return try Data(contentsOf: url)
     }
 
+    /// Delete Core Data entities whose backing files no longer exist on
+    /// disk. Called at app launch so the Library tab never shows a voice
+    /// that would silently fail to play. Returns the number of entities
+    /// removed (for logging).
+    @discardableResult
+    func pruneOrphans() async throws -> Int {
+        let dir = voicesDirectory
+        return try await CoreDataStack.shared.performBackgroundTask { context in
+            let request = NSFetchRequest<VoiceEntity>(entityName: "VoiceEntity")
+            let entities = try context.fetch(request)
+            let fm = FileManager.default
+            var removed = 0
+            for entity in entities {
+                guard let id = entity.id, let typeRaw = entity.type,
+                      let type = Voice.VoiceType(rawValue: typeRaw) else {
+                    // Unrecognised entity — drop it, it can never be rendered.
+                    context.delete(entity)
+                    removed += 1
+                    continue
+                }
+                // Cloned voices need an on-disk reference recording. Designed
+                // and preset voices don't.
+                if type == .cloned {
+                    let audioURL = dir.appendingPathComponent("\(id).wav")
+                    if !fm.fileExists(atPath: audioURL.path) {
+                        context.delete(entity)
+                        removed += 1
+                    }
+                }
+            }
+            if removed > 0 {
+                try context.save()
+            }
+            return removed
+        }
+    }
+
     func deleteVoice(_ id: UUID) async throws {
         try await CoreDataStack.shared.performBackgroundTask { context in
             let request = NSFetchRequest<VoiceEntity>(entityName: "VoiceEntity")

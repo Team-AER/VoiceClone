@@ -6,6 +6,13 @@
 //  on demand thereafter. The required snapshot (CustomVoice) gates the launch
 //  screen; Base and VoiceDesign are opt-in downloads from the Model Manager.
 //
+//  Resilience features:
+//   • Disk-space precheck (~snapshot size + 200 MB margin) before any HTTP.
+//   • Throughput / ETA tracking via a sliding 10-second window.
+//   • Atomic per-snapshot cleanup: any failure removes every file we wrote
+//     for that snapshot so the next retry starts clean.
+//   • `delete(_:)` lets the user free space from the Model Manager UI.
+//
 
 import Foundation
 
@@ -14,7 +21,7 @@ import Foundation
 enum SnapshotInstallState: Equatable {
     case absent
     case checking
-    case downloading(progress: Double, currentFile: String)
+    case downloading(progress: Double, currentFile: String, bytesPerSecond: Double, etaSeconds: Double?)
     case installed
     case failed(String)
 
@@ -56,24 +63,40 @@ final class ModelDownloadManager: NSObject, ObservableObject {
     /// optional downloads (Base, VoiceDesign).
     @Published private(set) var snapshotStates: [ModelSnapshot: SnapshotInstallState] = [:]
 
+    /// Per-snapshot disk footprint of installed files. Refreshed on
+    /// `rescan()` and after each download / delete. Used by the Settings
+    /// disk-usage row.
+    @Published private(set) var snapshotDiskUsage: [ModelSnapshot: Int64] = [:]
+
     private var urlSession: URLSession?
     /// Maps a URLSessionDownloadTask back to the (snapshot, file) it was
     /// fetching. Tasks are dispatched from background queues so we keep this
     /// keyed by `taskIdentifier`, which is stable for the lifetime of the task.
     private var taskRegistry: [Int: (snapshot: ModelSnapshot, file: ModelFile)] = [:]
     /// Per-snapshot pending file count + completed count, for progress UI.
-    private var pendingBySnapshot: [ModelSnapshot: (pending: [ModelFile], completed: Int)] = [:]
+    private var pendingBySnapshot: [ModelSnapshot: PendingDownload] = [:]
+
+    private struct PendingDownload {
+        let pending: [ModelFile]
+        var completed: Int
+        let startedAt: Date
+        var bytesWrittenWindow: [(at: Date, bytes: Int64)] = []
+        var totalBytesWritten: Int64 = 0
+        var totalBytesExpected: Int64
+    }
 
     override init() {
         super.init()
         // Lazy URLSession with a background-tolerant timeout.
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForResource = 3600
+        config.waitsForConnectivity = true
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
 
         // Initial scan: see what's already on disk.
         for snap in ModelSnapshot.allCases {
             snapshotStates[snap] = Self.isInstalled(snap) ? .installed : .absent
+            snapshotDiskUsage[snap] = Self.diskUsage(of: snap)
         }
         refreshGateState()
     }
@@ -86,7 +109,7 @@ final class ModelDownloadManager: NSObject, ObservableObject {
     }
 
     func retry() {
-        clearCorruptFiles(for: .customVoice)
+        clearSnapshotFiles(for: .customVoice)
         startDownload()
     }
 
@@ -99,15 +122,44 @@ final class ModelDownloadManager: NSObject, ObservableObject {
             refreshGateState()
             return
         }
-        clearCorruptFiles(for: snapshot)
+
+        // Atomic reset: if a previous attempt left half-downloaded files,
+        // wipe the directory so we never end up with mixed-version weights.
+        clearSnapshotFiles(for: snapshot)
+
         let missing = snapshot.manifest.filter { !fileIsValid($0, in: snapshot) }
         guard !missing.isEmpty else {
             snapshotStates[snapshot] = .installed
             refreshGateState()
             return
         }
-        pendingBySnapshot[snapshot] = (missing, 0)
-        snapshotStates[snapshot] = .downloading(progress: 0, currentFile: missing.first?.relativePath ?? "")
+
+        // Disk-space precheck.
+        let needed = missing.reduce(Int64(0)) { $0 + $1.expectedBytes }
+        let dir = Self.directory(for: snapshot)
+        if !DiskSpace.hasRoomFor(needed, at: dir) {
+            let free = DiskSpace.availableBytes(at: dir).map(DiskSpace.format) ?? "unknown"
+            let needStr = DiskSpace.format(needed)
+            let msg = "Not enough disk space — \(snapshot.displayName) needs \(needStr) but only \(free) is free. " +
+                      "Free up some space and try again."
+            AppLog.warning(msg, "download")
+            snapshotStates[snapshot] = .failed(msg)
+            refreshGateState()
+            return
+        }
+
+        pendingBySnapshot[snapshot] = PendingDownload(
+            pending: missing,
+            completed: 0,
+            startedAt: Date(),
+            totalBytesExpected: needed
+        )
+        snapshotStates[snapshot] = .downloading(
+            progress: 0,
+            currentFile: missing.first?.relativePath ?? "",
+            bytesPerSecond: 0,
+            etaSeconds: nil
+        )
         refreshGateState()
 
         guard let session = urlSession else { return }
@@ -117,6 +169,26 @@ final class ModelDownloadManager: NSObject, ObservableObject {
             taskRegistry[task.taskIdentifier] = (snapshot, file)
             task.resume()
         }
+        AppLog.info("Downloading \(snapshot.displayName) — \(missing.count) files, \(DiskSpace.format(needed))", "download")
+    }
+
+    /// Delete every file for a snapshot. Cancels any in-flight download for
+    /// that snapshot first.
+    func delete(_ snapshot: ModelSnapshot) {
+        // Cancel in-flight tasks targeting this snapshot.
+        for (id, mapping) in taskRegistry where mapping.snapshot == snapshot {
+            urlSession?.getAllTasks { tasks in
+                for t in tasks where t.taskIdentifier == id { t.cancel() }
+            }
+        }
+        taskRegistry = taskRegistry.filter { $0.value.snapshot != snapshot }
+        pendingBySnapshot.removeValue(forKey: snapshot)
+
+        clearSnapshotFiles(for: snapshot)
+        snapshotStates[snapshot] = .absent
+        snapshotDiskUsage[snapshot] = 0
+        refreshGateState()
+        AppLog.info("Deleted snapshot: \(snapshot.displayName)", "download")
     }
 
     /// Best-effort: re-scan disk and update snapshot states. Cheap.
@@ -125,6 +197,7 @@ final class ModelDownloadManager: NSObject, ObservableObject {
             // Don't clobber a download in progress.
             if case .downloading = snapshotStates[snap] { continue }
             snapshotStates[snap] = Self.isInstalled(snap) ? .installed : .absent
+            snapshotDiskUsage[snap] = Self.diskUsage(of: snap)
         }
         refreshGateState()
     }
@@ -167,6 +240,20 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         return true
     }
 
+    /// Total bytes occupied on disk by a snapshot's files. 0 if absent.
+    nonisolated static func diskUsage(of snapshot: ModelSnapshot) -> Int64 {
+        let fm = FileManager.default
+        let dir = directory(for: snapshot)
+        var total: Int64 = 0
+        for file in snapshot.manifest {
+            let url = dir.appendingPathComponent(file.relativePath)
+            if let size = (try? fm.attributesOfItem(atPath: url.path)[.size]) as? NSNumber {
+                total += size.int64Value
+            }
+        }
+        return total
+    }
+
     /// Backward-compat for the E2E test — true when the required (CustomVoice)
     /// snapshot is installed.
     nonisolated static func areModelsAvailable() -> Bool {
@@ -205,15 +292,26 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         return headerLen > 0 && headerLen < 100_000_000
     }
 
-    private func clearCorruptFiles(for snapshot: ModelSnapshot) {
+    /// Atomic per-snapshot wipe — used both for failure recovery and for
+    /// the user-initiated "Delete" action. Removes every manifested file
+    /// (and the speech_tokenizer subdirectory if empty afterwards).
+    private func clearSnapshotFiles(for snapshot: ModelSnapshot) {
         let fm = FileManager.default
         let dir = Self.directory(for: snapshot)
         for file in snapshot.manifest {
             let url = dir.appendingPathComponent(file.relativePath)
-            guard fm.fileExists(atPath: url.path) else { continue }
-            if !Self.contentIsValid(at: url) {
-                try? fm.removeItem(at: url)
-                print("⚠️ Removed corrupt cached file: \(snapshot.rawValue)/\(file.relativePath)")
+            try? fm.removeItem(at: url)
+        }
+        // Try to remove now-empty subdirectories (e.g. speech_tokenizer/).
+        if let contents = try? fm.contentsOfDirectory(atPath: dir.path) {
+            for sub in contents {
+                let subURL = dir.appendingPathComponent(sub)
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: subURL.path, isDirectory: &isDir),
+                   isDir.boolValue,
+                   (try? fm.contentsOfDirectory(atPath: subURL.path))?.isEmpty == true {
+                    try? fm.removeItem(at: subURL)
+                }
             }
         }
     }
@@ -231,7 +329,7 @@ final class ModelDownloadManager: NSObject, ObservableObject {
             state = .awaitingPermission
         case .checking:
             state = .checking
-        case .downloading(let progress, let currentFile):
+        case .downloading(let progress, let currentFile, _, _):
             state = .downloading(file: currentFile, progress: progress, overallProgress: progress)
         case .installed:
             state = .ready
@@ -328,7 +426,8 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
             guard let mapping = self.taskRegistry[taskId] else { return }
             self.publishProgress(snapshot: mapping.snapshot,
                                  currentFile: mapping.file.relativePath,
-                                 currentFileProgress: fileProgress)
+                                 currentFileProgress: fileProgress,
+                                 bytesWritten: bytesWritten)
         }
     }
 
@@ -338,6 +437,8 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
         didCompleteWithError error: Error?
     ) {
         guard let error else { return }
+        // Cancellations from `delete(_:)` should not surface as failures.
+        if (error as NSError).code == NSURLErrorCancelled { return }
         let taskId = task.taskIdentifier
         let message = error.localizedDescription
         Task { @MainActor in
@@ -349,6 +450,7 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
     // MARK: - State transitions (main-actor)
 
     private func failSnapshot(_ snapshot: ModelSnapshot, reason: String) {
+        AppLog.error("Snapshot \(snapshot.displayName) failed: \(reason)", "download")
         snapshotStates[snapshot] = .failed(reason)
         pendingBySnapshot.removeValue(forKey: snapshot)
         // Cancel any sibling tasks for this snapshot.
@@ -360,6 +462,9 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
             }
         }
         taskRegistry = taskRegistry.filter { $0.value.snapshot != snapshot }
+        // Atomic cleanup so the next retry starts from a known-clean directory.
+        clearSnapshotFiles(for: snapshot)
+        snapshotDiskUsage[snapshot] = 0
         refreshGateState()
     }
 
@@ -374,24 +479,68 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
             // Final verification: a corrupt file would still mean "absent."
             if Self.isInstalled(snapshot) {
                 snapshotStates[snapshot] = .installed
+                snapshotDiskUsage[snapshot] = Self.diskUsage(of: snapshot)
+                AppLog.notice("Snapshot \(snapshot.displayName) installed.", "download")
             } else {
                 snapshotStates[snapshot] = .failed("Some files failed verification after download.")
+                clearSnapshotFiles(for: snapshot)
+                snapshotDiskUsage[snapshot] = 0
             }
         } else {
             let progress = Double(entry.completed) / Double(max(total, 1))
             let currentFile = entry.pending[min(entry.completed, total - 1)].relativePath
-            snapshotStates[snapshot] = .downloading(progress: progress, currentFile: currentFile)
+            let bps = throughput(for: entry)
+            let eta = etaSeconds(for: entry, bps: bps)
+            snapshotStates[snapshot] = .downloading(
+                progress: progress,
+                currentFile: currentFile,
+                bytesPerSecond: bps,
+                etaSeconds: eta
+            )
         }
         refreshGateState()
     }
 
     private func publishProgress(snapshot: ModelSnapshot,
                                  currentFile: String,
-                                 currentFileProgress: Double) {
-        guard let entry = pendingBySnapshot[snapshot] else { return }
+                                 currentFileProgress: Double,
+                                 bytesWritten: Int64) {
+        guard var entry = pendingBySnapshot[snapshot] else { return }
+        // Sliding window: keep the last 10s of write events.
+        let now = Date()
+        entry.bytesWrittenWindow.append((now, bytesWritten))
+        let cutoff = now.addingTimeInterval(-10)
+        entry.bytesWrittenWindow.removeAll { $0.at < cutoff }
+        entry.totalBytesWritten += bytesWritten
+        pendingBySnapshot[snapshot] = entry
+
         let total = entry.pending.count
         let overall = (Double(entry.completed) + currentFileProgress) / Double(max(total, 1))
-        snapshotStates[snapshot] = .downloading(progress: overall, currentFile: currentFile)
+        let bps = throughput(for: entry)
+        let eta = etaSeconds(for: entry, bps: bps)
+        snapshotStates[snapshot] = .downloading(
+            progress: overall,
+            currentFile: currentFile,
+            bytesPerSecond: bps,
+            etaSeconds: eta
+        )
         refreshGateState()
+    }
+
+    private func throughput(for entry: PendingDownload) -> Double {
+        guard let first = entry.bytesWrittenWindow.first,
+              let last = entry.bytesWrittenWindow.last,
+              last.at > first.at else {
+            return 0
+        }
+        let bytes = entry.bytesWrittenWindow.reduce(Int64(0)) { $0 + $1.bytes }
+        let elapsed = last.at.timeIntervalSince(first.at)
+        return Double(bytes) / max(elapsed, 0.001)
+    }
+
+    private func etaSeconds(for entry: PendingDownload, bps: Double) -> Double? {
+        guard bps > 0 else { return nil }
+        let remaining = max(entry.totalBytesExpected - entry.totalBytesWritten, 0)
+        return Double(remaining) / bps
     }
 }

@@ -18,9 +18,9 @@ struct ModelDownloadView: View {
                 .foregroundStyle(.tint)
 
             VStack(spacing: 8) {
-                Text("VoiceClone")
+                Text("PolyjuiceVoice")
                     .font(.largeTitle.bold())
-                Text("AI voice synthesis, on-device")
+                Text("Take on any voice — on-device")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -34,7 +34,7 @@ struct ModelDownloadView: View {
                     VStack(spacing: 8) {
                         Text("On-Device AI Models Required")
                             .font(.headline)
-                        Text("VoiceClone needs to download ~4 GB of AI models to synthesize speech entirely on your device. No audio data ever leaves your Mac.")
+                        Text("PolyjuiceVoice needs to download ~4 GB of AI models to synthesize speech entirely on your device. No audio data ever leaves your Mac.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)

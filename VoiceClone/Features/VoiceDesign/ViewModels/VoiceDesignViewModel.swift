@@ -127,6 +127,20 @@ final class VoiceDesignViewModel: ObservableObject {
     func synthesize() async {
         guard let tts = ttsService else { return }
 
+        // Pre-flight: validate text + instruction before model load.
+        let textResult = TextSanitizer.sanitize(text)
+        guard let cleanedText = textResult.sanitized else {
+            self.error = textResult.message
+            return
+        }
+        let instrResult = TextSanitizer.sanitize(instruction)
+        guard let cleanedInstr = instrResult.sanitized else {
+            self.error = "Voice description: " + (instrResult.message ?? "invalid")
+            return
+        }
+        self.text = cleanedText
+        self.instruction = cleanedInstr
+
         // Defensive: ensure the VoiceDesign snapshot is loaded. Idempotent
         // when already loaded; closes any race with the setup load still
         // being in flight (e.g. the user navigated to this tab and tapped

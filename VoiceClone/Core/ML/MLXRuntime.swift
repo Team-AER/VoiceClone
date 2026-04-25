@@ -30,6 +30,20 @@ enum MLXRuntime {
     /// log it (or surface it in a debug overlay later).
     @discardableResult
     static func bootstrap() -> Configuration {
+        // 0. Guard rails. MLX requires Metal — the iOS Simulator can't run
+        //    this app at all. Fail loudly with a useful message instead of
+        //    a cryptic Metal-not-available error deep inside generation.
+        #if targetEnvironment(simulator)
+        AppLog.fault(
+            "VoiceClone cannot run in the iOS Simulator — MLX requires Metal hardware. " +
+            "Build for 'My Mac (Designed for iPad)' or a physical device.",
+            "runtime"
+        )
+        #endif
+
+        // 0.1. Sweep stale recordings / exports the previous session left behind.
+        TempCleaner.sweep()
+
         // 1. Pin the default device to .gpu explicitly.
         Device.setDefault(device: .gpu)
 
@@ -89,11 +103,14 @@ enum MLXRuntime {
         let recommended = fmt.string(fromByteCount: Int64(config.recommendedWorkingSetBytes))
         let sysMem = fmt.string(fromByteCount: Int64(config.systemMemoryBytes))
         let deviceLabel = config.isGPU ? "Metal GPU" : "CPU (FALLBACK)"
-        print("""
-              🧠 MLX runtime ready
-                 device   : \(deviceLabel) — \(config.architecture)
-                 sys mem  : \(sysMem)   recommended working set: \(recommended)
-                 mem limit: \(memLimit)   cache limit: \(cacheLimit)
-              """)
+        AppLog.notice(
+            "MLX runtime ready — device: \(deviceLabel) (\(config.architecture)), " +
+            "sys mem: \(sysMem), recommended working set: \(recommended), " +
+            "mem limit: \(memLimit), cache limit: \(cacheLimit)",
+            "runtime"
+        )
+        if !config.isGPU {
+            AppLog.warning("MLX fell back to CPU — inference will be slow.", "runtime")
+        }
     }
 }

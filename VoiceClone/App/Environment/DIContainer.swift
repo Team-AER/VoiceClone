@@ -15,8 +15,23 @@ final class DIContainer: ObservableObject {
     init() {
         let audioEngine = AudioEngine()
         self.audioEngine = audioEngine
-        self.voiceStorage = VoiceStorage()
+        let storage = VoiceStorage()
+        self.voiceStorage = storage
         self.ttsService = MLXTTSService(audioEngine: audioEngine)
+
+        // Clean up orphaned voice rows (Core Data entities whose backing
+        // .wav was deleted out from under us) so the Library never shows
+        // a voice that would silently fail.
+        Task.detached(priority: .background) {
+            do {
+                let removed = try await storage.pruneOrphans()
+                if removed > 0 {
+                    AppLog.info("Pruned \(removed) orphaned voice(s) from the library.", "storage")
+                }
+            } catch {
+                AppLog.warning("Voice library prune failed: \(error.localizedDescription)", "storage")
+            }
+        }
     }
 }
 

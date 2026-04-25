@@ -19,29 +19,32 @@ struct VoiceDesignView: View {
         NavigationStack {
             Group {
                 if let missing = viewModel.missingSnapshot {
-                    VStack {
-                        Spacer()
-                        MissingSnapshotPrompt(snapshot: missing) {
-                            showingModelManager = true
-                        }
-                        Spacer()
-                    }
-                    .padding()
+                    centeredMissing(missing)
                 } else {
-                    designForm
+                    ScrollView {
+                        GlassEffectContainer(spacing: 18) {
+                            VStack(alignment: .leading, spacing: 18) {
+                                textEditor
+                                instructionEditor
+                                languageSelector
+                                playbackCard
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.top, 12)
+                            .padding(.bottom, 110)
+                        }
+                    }
+                    .scrollContentBackground(.hidden)
+                    .scrollEdgeEffectStyle(.soft, for: .top)
+                    .safeAreaInset(edge: .bottom) {
+                        synthesizeButton
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 14)
+                    }
                 }
             }
             .navigationTitle("Design")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showingModelManager = true
-                    } label: {
-                        Image(systemName: "icloud.and.arrow.down")
-                    }
-                    .help("Manage models")
-                }
-            }
+            .toolbar { toolbarContent }
             .task {
                 await viewModel.setup(
                     ttsService: container.ttsService,
@@ -74,54 +77,48 @@ struct VoiceDesignView: View {
         }
     }
 
-    private var designForm: some View {
-        VStack(spacing: 20) {
-            textEditor
-            instructionEditor
-            languageSelector
-            waveformDisplay
-            controlButtons
-            synthesizeButton
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarSpacer(.flexible, placement: .primaryAction)
+        ToolbarItemGroup(placement: .primaryAction) {
+            DebugLogToolbarButton()
+            Button {
+                showingModelManager = true
+            } label: {
+                Image(systemName: "internaldrive")
+            }
+            .accessibilityLabel("Models")
+            .help("Manage downloaded models")
+        }
+    }
+
+    private func centeredMissing(_ missing: ModelSnapshot) -> some View {
+        VStack {
+            Spacer()
+            MissingSnapshotPrompt(snapshot: missing) {
+                showingModelManager = true
+            }
+            Spacer()
         }
         .padding()
     }
 
-    private var errorBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.error != nil },
-            set: { newValue in
-                if !newValue { viewModel.clearError() }
-            }
-        )
-    }
-
     private var textEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Text to speak")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            TextEditor(text: $viewModel.text)
-                .frame(minHeight: 120)
-                .padding(8)
-                .background(.quaternary)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+            FieldLabel(title: "Text to speak")
+            GlassTextEditor(text: $viewModel.text,
+                            minHeight: 130,
+                            prompt: "Type or paste what this voice should say…")
         }
     }
 
     private var instructionEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Voice description")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            TextEditor(text: $viewModel.instruction)
-                .frame(minHeight: 80)
-                .padding(8)
-                .background(.quaternary)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            Text("Example: \"A warm female voice with a friendly tone\"")
+            FieldLabel(title: "Voice description")
+            GlassTextEditor(text: $viewModel.instruction,
+                            minHeight: 90,
+                            prompt: "e.g. A warm female voice with a friendly tone")
+            Text("Describe the voice you want — tone, age, mood, accent.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -129,86 +126,85 @@ struct VoiceDesignView: View {
 
     private var languageSelector: some View {
         HStack {
-            Text("Language:")
-                .foregroundStyle(.secondary)
-
+            FieldLabel(title: "Language")
             Picker("Language", selection: $viewModel.language) {
                 ForEach(Language.allCases, id: \.self) { language in
                     Text(language.rawValue).tag(language)
                 }
             }
             .pickerStyle(.menu)
-
+            .labelsHidden()
             Spacer()
         }
     }
 
-    private var waveformDisplay: some View {
-        WaveformView(samples: viewModel.waveformSamples, progress: viewModel.playbackProgress)
-            .frame(height: 60)
-            .background(.quaternary)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
+    private var playbackCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                WaveformView(samples: viewModel.waveformSamples,
+                             progress: viewModel.playbackProgress)
+                    .frame(height: 64)
 
-    private var controlButtons: some View {
-        HStack(spacing: 24) {
-            Button {
-                viewModel.togglePlayback()
-            } label: {
-                Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title2)
-            }
-            .disabled(!viewModel.hasAudio)
+                HStack(spacing: 18) {
+                    Button {
+                        viewModel.togglePlayback()
+                    } label: {
+                        Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.title2)
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
+                    .disabled(!viewModel.hasAudio)
+                    .keyboardShortcut(.space, modifiers: [])
 
-            Button {
-                showingSaveSheet = true
-            } label: {
-                Label("Save Voice", systemImage: "square.and.arrow.down.on.square")
-            }
-            .disabled(!viewModel.canSaveVoice)
+                    Button {
+                        showingSaveSheet = true
+                    } label: {
+                        Label("Save Voice", systemImage: "tray.and.arrow.down")
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(!viewModel.canSaveVoice)
+                    .keyboardShortcut("s", modifiers: [.command])
 
-            Spacer()
+                    Spacer()
 
-            if let url = viewModel.exportURL {
-                ShareLink(item: url) {
-                    Label("Export", systemImage: "square.and.arrow.down")
+                    if let url = viewModel.exportURL {
+                        ShareLink(item: url) {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.glass)
+                        .keyboardShortcut("e", modifiers: [.command])
+                    } else {
+                        Button {
+                            viewModel.export()
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(!viewModel.hasAudio)
+                        .keyboardShortcut("e", modifiers: [.command])
+                    }
                 }
-                .disabled(!viewModel.hasAudio)
-            } else {
-                Button {
-                    viewModel.export()
-                } label: {
-                    Label("Export", systemImage: "square.and.arrow.down")
-                }
-                .disabled(!viewModel.hasAudio)
             }
         }
-        .buttonStyle(.plain)
     }
 
     private var synthesizeButton: some View {
-        Button {
-            Task {
-                await viewModel.synthesize()
-            }
-        } label: {
-            Group {
-                if viewModel.isSynthesizing {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                } else {
-                    Text("Generate")
-                        .fontWeight(.semibold)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(viewModel.canSynthesize ? Color.accentColor : Color.gray)
-            .foregroundStyle(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+        PrimaryActionButton(
+            title: "Generate",
+            isWorking: viewModel.isSynthesizing,
+            isEnabled: viewModel.canSynthesize
+        ) {
+            Task { await viewModel.synthesize() }
         }
-        .disabled(!viewModel.canSynthesize)
+        .keyboardShortcut(.return, modifiers: [.command])
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.error != nil },
+            set: { newValue in if !newValue { viewModel.clearError() } }
+        )
     }
 }
 
