@@ -2,164 +2,85 @@
 //  MLXTTSService.swift
 //  VoiceClone
 //
-//  TTS service using MLX backend instead of CoreML
+//  Thin wrapper around the vendored Qwen3TTSModel (`Core/ML/MLX/Qwen3TTS/`).
+//  The vendored package handles model loading, tokenization (via
+//  swift-transformers AutoTokenizer), autoregressive talker generation, and
+//  speech-tokenizer decoding end-to-end. This service only adapts the app's
+//  existing API (capabilities, streaming AudioChunks, state machine) to that
+//  package's entry points.
 //
 
 import Foundation
-@preconcurrency import MLX
+import MLX
 import AVFoundation
-import Combine
 
-/// TTS Service using MLX backend
-@available(iOS 16.0, *)
+/// TTS service backed by the vendored Qwen3TTS implementation.
+@available(iOS 18.0, macOS 15.0, *)
 @MainActor
 final class MLXTTSService: ObservableObject {
 
-    // MARK: - Published Properties
+    // MARK: - Published state
 
     @Published private(set) var state: TTSServiceState = .idle
     @Published private(set) var loadedCapabilities: Set<TTSCapability> = []
 
-    // MARK: - Private Properties
+    // MARK: - Private state
 
-    private var talkerModel: MLXQwen3TTSModel?
-    private var decoderModel: MLXSpeechDecoder?
-    private let tokenizer: Qwen3Tokenizer
+    private var model: Qwen3TTSModel?
     private let audioEngine: AudioEngine
 
-    // MARK: - Initialization
+    // MARK: - Init
 
-    init(tokenizer: Qwen3Tokenizer, audioEngine: AudioEngine) {
-        self.tokenizer = tokenizer
+    /// The model directory is determined by `ModelDownloadManager.currentModelDirectory`
+    /// and the tokenizer lives inside that directory; the service therefore no
+    /// longer takes a tokenizer argument.
+    init(audioEngine: AudioEngine) {
         self.audioEngine = audioEngine
     }
 
-    // MARK: - Public Methods
+    // MARK: - Capability loading
 
     func loadCapability(_ capability: TTSCapability) async throws {
+        // The mlx-community CustomVoice snapshot covers voiceDesign (via instruct),
+        // customVoice (via speaker) and voiceClone (via reference audio). We load
+        // the same model for any capability and record that it's available.
         state = .loading
-
         do {
-            // Get model path from bundle
-            guard let talkerPath = getModelPath(for: capability) else {
-                throw TTSError.modelNotFound(capability)
+            if model == nil {
+                let dir = ModelDownloadManager.currentModelDirectory
+                guard FileManager.default.fileExists(atPath: dir.path) else {
+                    throw TTSError.modelNotFound(capability)
+                }
+                model = try await Qwen3TTSModel.fromPretrained(dir.path)
             }
-
-            // Load talker model on background thread
-            let talker = try await Task.detached(priority: .userInitiated) {
-                try await MLXQwen3TTSModel(modelPath: talkerPath)
-            }.value
-
-            // Load decoder model if available
-            let decoder: MLXSpeechDecoder?
-            if let decoderPath = getDecoderPath() {
-                decoder = try await Task.detached(priority: .userInitiated) {
-                    try await MLXSpeechDecoder(modelPath: decoderPath)
-                }.value
-                print("✓ Speech decoder loaded")
-            } else {
-                decoder = nil
-                print("⚠️ Speech decoder not found, using placeholder audio")
-            }
-
-            await MainActor.run {
-                self.talkerModel = talker
-                self.decoderModel = decoder
-                self.loadedCapabilities.insert(capability)
-                self.state = .ready
-            }
-
-            print("✓ MLX models loaded for \(capability)")
+            loadedCapabilities.insert(capability)
+            state = .ready
         } catch {
             state = .idle
             throw TTSError.modelLoadFailed(error.localizedDescription)
         }
     }
 
+    // MARK: - Synthesis — voice design
+
     func synthesize(
         text: String,
         language: Language,
         instruction: String
     ) async throws -> AsyncThrowingStream<AudioChunk, Error> {
-        guard loadedCapabilities.contains(.voiceDesign) else {
-            throw TTSError.capabilityNotLoaded(.voiceDesign)
-        }
-
-        state = .synthesizing(progress: 0)
-
-        guard let talker = talkerModel else {
-            throw TTSError.modelNotLoaded
-        }
-
-        return AsyncThrowingStream<AudioChunk, Error> { (continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation) in
-            Task { @MainActor in
-                await self.performSynthesis(
-                    tokens: self.tokenizer.encode(text: text, language: language, instruction: instruction),
-                    talker: talker,
-                    continuation: continuation
-                )
-            }
-        }
-    }
-    
-    private func performSynthesis(
-        tokens: [Int],
-        talker: MLXQwen3TTSModel,
-        continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation
-    ) async {
-        do {
-            guard !tokens.isEmpty else {
-                throw TTSError.tokenizationFailed
-            }
-
-            print("MLX: Synthesizing \(tokens.count) tokens...")
-
-            // Generate audio codes - talker is an actor, so call directly
-            let inputIds = MLXArray(tokens.map { Int32($0) }).reshaped(1, tokens.count)
-            let audioCodes = try await talker.generate(inputIds: inputIds)
-
-            // Decode audio codes to waveform
-            let samples: [Float]
-            let sampleRate = 24000
-            
-            if let decoder = self.decoderModel {
-                let waveform = try await decoder.decode(audioCodes)
-                samples = Array(waveform.asArray(Float.self))
-                print("✓ Decoded \(samples.count) audio samples")
-            } else {
-                // Fallback to placeholder audio
-                let duration = Float(tokens.count) * 0.05
-                let numSamples = Int(Float(sampleRate) * duration)
-                samples = Self.generatePlaceholderSamples(count: numSamples, sampleRate: sampleRate)
-                print("⚠️ Using placeholder audio (decoder not loaded)")
-            }
-
-            let chunk = AudioChunk(
-                samples: samples,
-                sampleRate: sampleRate,
-                timestamp: Date().timeIntervalSince1970
+        try requireCapability(.voiceDesign)
+        return makeStream { [weak self] continuation in
+            await self?.run(
+                text: text,
+                language: language,
+                speaker: nil,
+                instruction: instruction,
+                continuation: continuation
             )
+        }
+    }
 
-            continuation.yield(chunk)
-            continuation.finish()
-            self.state = .ready
-        } catch {
-            continuation.finish(throwing: error)
-            self.state = .error(error.localizedDescription)
-        }
-    }
-    
-    private static func generatePlaceholderSamples(count: Int, sampleRate: Int) -> [Float] {
-        let sr = Float(sampleRate)
-        var samples = [Float](repeating: 0, count: count)
-        for i in 0..<count {
-            let t = Float(i)
-            let freq1: Float = sin(t * 2.0 * .pi * 440.0 / sr)
-            let freq2: Float = sin(t * 2.0 * .pi * 554.0 / sr) * 0.5
-            samples[i] = (freq1 + freq2) * 0.1
-        }
-        return samples
-    }
+    // MARK: - Synthesis — preset/custom voice
 
     func synthesize(
         text: String,
@@ -167,80 +88,19 @@ final class MLXTTSService: ObservableObject {
         speaker: PresetVoice,
         instruction: String? = nil
     ) async throws -> AsyncThrowingStream<AudioChunk, Error> {
-        guard loadedCapabilities.contains(.customVoice) else {
-            throw TTSError.capabilityNotLoaded(.customVoice)
-        }
-
-        state = .synthesizing(progress: 0)
-
-        guard let talker = talkerModel else {
-            throw TTSError.modelNotLoaded
-        }
-
-        let speakerInstruction = instruction ?? "Speak naturally as \(speaker.rawValue)."
-        let tokens = self.tokenizer.encode(
-            text: text,
-            language: language,
-            instruction: "<|speaker:\(speaker.embeddingId)|> \(speakerInstruction)"
-        )
-        
-        return AsyncThrowingStream<AudioChunk, Error> { (continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation) in
-            Task { @MainActor in
-                await self.performSynthesisWithSpeaker(
-                    tokens: tokens,
-                    speaker: speaker,
-                    talker: talker,
-                    continuation: continuation
-                )
-            }
-        }
-    }
-    
-    private func performSynthesisWithSpeaker(
-        tokens: [Int],
-        speaker: PresetVoice,
-        talker: MLXQwen3TTSModel,
-        continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation
-    ) async {
-        do {
-            guard !tokens.isEmpty else {
-                throw TTSError.tokenizationFailed
-            }
-
-            print("MLX: Synthesizing \(tokens.count) tokens with speaker \(speaker.rawValue)...")
-
-            // Generate audio codes - talker is an actor, so call directly
-            let inputIds = MLXArray(tokens.map { Int32($0) }).reshaped(1, tokens.count)
-            let audioCodes = try await talker.generate(inputIds: inputIds)
-
-            // Decode audio codes to waveform
-            let samples: [Float]
-            let sampleRate = 24000
-            
-            if let decoder = self.decoderModel {
-                let waveform = try await decoder.decode(audioCodes)
-                samples = Array(waveform.asArray(Float.self))
-                print("✓ Decoded \(samples.count) audio samples")
-            } else {
-                let numSamples = Int(Float(tokens.count) * 0.05 * Float(sampleRate))
-                samples = Self.generatePlaceholderSamples(count: numSamples, sampleRate: sampleRate)
-                print("⚠️ Using placeholder audio (decoder not loaded)")
-            }
-
-            let chunk = AudioChunk(
-                samples: samples,
-                sampleRate: sampleRate,
-                timestamp: Date().timeIntervalSince1970
+        try requireCapability(.customVoice)
+        return makeStream { [weak self] continuation in
+            await self?.run(
+                text: text,
+                language: language,
+                speaker: speaker.rawValue,
+                instruction: instruction,
+                continuation: continuation
             )
-
-            continuation.yield(chunk)
-            continuation.finish()
-            self.state = .ready
-        } catch {
-            continuation.finish(throwing: error)
-            self.state = .error(error.localizedDescription)
         }
     }
+
+    // MARK: - Synthesis — voice cloning
 
     func synthesize(
         text: String,
@@ -248,18 +108,16 @@ final class MLXTTSService: ObservableObject {
         referenceAudio: Data,
         referenceText: String
     ) async throws -> AsyncThrowingStream<AudioChunk, Error> {
-        guard loadedCapabilities.contains(.voiceClone) else {
-            throw TTSError.capabilityNotLoaded(.voiceClone)
-        }
-
-        // For now, fall back to voice design
-        print("⚠️ MLX voice cloning not yet implemented, using voice design")
-        return try await synthesize(
-            text: text,
-            language: language,
-            instruction: "Speak naturally"
+        try requireCapability(.voiceClone)
+        // Voice cloning requires the Base model; the CustomVoice snapshot does
+        // not support it. Surface the limitation explicitly rather than silently
+        // falling back.
+        throw TTSError.modelLoadFailed(
+            "Voice cloning requires the Qwen3-TTS-Base model, which is not installed."
         )
     }
+
+    // MARK: - Playback
 
     func playStream(_ stream: AsyncThrowingStream<AudioChunk, Error>) async throws {
         try await audioEngine.playStream(stream)
@@ -271,107 +129,89 @@ final class MLXTTSService: ObservableObject {
         state = .ready
     }
 
-    // MARK: - Helper Methods
+    // MARK: - Availability probe
 
-    private func getDecoderPath() -> URL? {
-        let modelName = "Qwen3TTS_Decoder"
-
-        // 1) Application Support (macOS downloaded models) / Documents (iOS)
-        let managedDir = ModelDownloadManager.modelsDirectory
-            .appendingPathComponent(modelName, isDirectory: true)
-        if fileExists(in: managedDir, config: "decoder_config.json", weights: "decoder_weights.safetensors") {
-            print("✓ Using decoder from managed dir: \(managedDir.path)")
-            return managedDir
-        }
-
-        // 2) Bundle resources
-        if let configURL = Bundle.main.url(forResource: "decoder_config", withExtension: "json") {
-            let bundleRoot = configURL.deletingLastPathComponent()
-            if fileExists(in: bundleRoot, config: "decoder_config.json", weights: "decoder_weights.safetensors") {
-                print("✓ Using decoder from Bundle root: \(bundleRoot.path)")
-                return bundleRoot
-            }
-        }
-
-        guard let resourcesRoot = Bundle.main.resourceURL else { return nil }
-
-        for subpath in ["Resources/MLXModels/\(modelName)", "MLXModels/\(modelName)", modelName] {
-            let dir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
-            if fileExists(in: dir, config: "decoder_config.json", weights: "decoder_weights.safetensors") {
-                print("✓ Using decoder from Bundle subpath: \(dir.path)")
-                return dir
-            }
-        }
-
-        // 3) Developer override via environment variable (DEBUG only)
-        #if DEBUG
-        if let envBase = ProcessInfo.processInfo.environment["VOICECLONE_MODELS_DIR"] {
-            let dir = URL(fileURLWithPath: envBase).appendingPathComponent(modelName)
-            if fileExists(in: dir, config: "decoder_config.json", weights: "decoder_weights.safetensors") {
-                print("✓ Using decoder from VOICECLONE_MODELS_DIR: \(dir.path)")
-                return dir
-            }
-        }
-        #endif
-
-        return nil
+    /// True when the required files for synthesis are on disk. Safe to call
+    /// from any isolation context.
+    nonisolated static func areModelsAvailable() -> Bool {
+        ModelDownloadManager.areModelsAvailable()
     }
 
-    private func fileExists(in dir: URL, config: String, weights: String) -> Bool {
-        FileManager.default.fileExists(atPath: dir.appendingPathComponent(config).path) &&
-        FileManager.default.fileExists(atPath: dir.appendingPathComponent(weights).path)
+    // MARK: - Private helpers
+
+    private func requireCapability(_ capability: TTSCapability) throws {
+        guard loadedCapabilities.contains(capability) else {
+            throw TTSError.capabilityNotLoaded(capability)
+        }
+        guard model != nil else {
+            throw TTSError.modelNotLoaded
+        }
     }
 
-    private func getModelPath(for capability: TTSCapability) -> URL? {
-        // Determine model name per capability
-        let modelName: String
-        switch capability {
-        case .voiceDesign:
-            modelName = "Qwen3TTS_FP16"
-        case .customVoice:
-            modelName = "Qwen3TTS_FP16"  // Same model for now
-        case .voiceClone:
-            modelName = "Qwen3TTS_FP16"  // Same model for now
-        }
-
-        // 1) Application Support (macOS) / Documents (iOS) — managed by ModelDownloadManager
-        let managedDir = ModelDownloadManager.modelsDirectory
-            .appendingPathComponent(modelName, isDirectory: true)
-        if fileExists(in: managedDir, config: "talker_config.json", weights: "talker_weights.safetensors") {
-            print("✓ Using talker from managed dir: \(managedDir.path)")
-            return managedDir
-        }
-
-        // 2) Bundle resources (iOS development builds)
-        if let configURL = Bundle.main.url(forResource: "talker_config", withExtension: "json") {
-            let bundleRoot = configURL.deletingLastPathComponent()
-            if fileExists(in: bundleRoot, config: "talker_config.json", weights: "talker_weights.safetensors") {
-                print("✓ Using talker from Bundle root: \(bundleRoot.path)")
-                return bundleRoot
+    private func makeStream(
+        _ body: @escaping @MainActor (AsyncThrowingStream<AudioChunk, Error>.Continuation) async -> Void
+    ) -> AsyncThrowingStream<AudioChunk, Error> {
+        AsyncThrowingStream { continuation in
+            Task { @MainActor in
+                await body(continuation)
             }
         }
+    }
 
-        if let resourcesRoot = Bundle.main.resourceURL {
-            for subpath in ["Resources/MLXModels/\(modelName)", "MLXModels/\(modelName)", modelName] {
-                let dir = resourcesRoot.appendingPathComponent(subpath, isDirectory: true)
-                if fileExists(in: dir, config: "talker_config.json", weights: "talker_weights.safetensors") {
-                    print("✓ Using talker from Bundle subpath: \(dir.path)")
-                    return dir
-                }
-            }
+    private func run(
+        text: String,
+        language: Language,
+        speaker: String?,
+        instruction: String?,
+        continuation: AsyncThrowingStream<AudioChunk, Error>.Continuation
+    ) async {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            continuation.finish(throwing: TTSError.tokenizationFailed)
+            state = .error("Empty text")
+            return
+        }
+        guard let model = model else {
+            continuation.finish(throwing: TTSError.modelNotLoaded)
+            state = .error("Model not loaded")
+            return
         }
 
-        // 3) Developer override via environment variable (DEBUG only)
-        #if DEBUG
-        if let envBase = ProcessInfo.processInfo.environment["VOICECLONE_MODELS_DIR"] {
-            let dir = URL(fileURLWithPath: envBase).appendingPathComponent(modelName)
-            if fileExists(in: dir, config: "talker_config.json", weights: "talker_weights.safetensors") {
-                print("✓ Using talker from VOICECLONE_MODELS_DIR: \(dir.path)")
-                return dir
-            }
-        }
-        #endif
+        state = .synthesizing(progress: 0)
+        do {
+            let audio = try await model.generate(
+                text: text,
+                speaker: speaker,
+                instruct: instruction,
+                language: language.qwenLanguageCode
+            )
+            eval(audio)
+            let samples = audio.asArray(Float.self)
 
-        return nil
+            let chunk = AudioChunk(
+                samples: samples,
+                sampleRate: model.sampleRate,
+                timestamp: Date().timeIntervalSince1970
+            )
+            continuation.yield(chunk)
+            continuation.finish()
+            state = .ready
+        } catch {
+            continuation.finish(throwing: error)
+            state = .error(error.localizedDescription)
+        }
+    }
+}
+
+private extension Language {
+    /// Map the app's `Language` enum to the codes the Qwen3 config expects.
+    /// "auto" is the model's default for anything we don't map explicitly.
+    var qwenLanguageCode: String {
+        switch self {
+        case .english:  return "english"
+        case .chinese:  return "chinese"
+        case .japanese: return "japanese"
+        case .korean:   return "korean"
+        case .spanish, .french, .german: return "auto"
+        }
     }
 }

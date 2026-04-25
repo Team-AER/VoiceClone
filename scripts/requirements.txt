@@ -1,5 +1,0 @@
-torch>=2.9.0
-transformers>=4.44.0
-qwen-tts
-numpy<2.0
-safetensors>=0.4.0

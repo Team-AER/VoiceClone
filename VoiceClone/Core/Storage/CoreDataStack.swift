@@ -5,7 +5,7 @@
 
 import CoreData
 
-final class CoreDataStack {
+final class CoreDataStack: @unchecked Sendable {
 
     static let shared = CoreDataStack()
 

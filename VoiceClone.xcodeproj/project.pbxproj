@@ -9,6 +9,9 @@
 /* Begin PBXBuildFile section */
 		1CDCCBC82F2CB3700033820A /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 1CDCCBC72F2CB3700033820A /* MLX */; };
 		1CDCCBCA2F2CB3700033820A /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 1CDCCBC92F2CB3700033820A /* MLXNN */; };
+		Q3TTS000000000000000010 /* MLXFast in Frameworks */ = {isa = PBXBuildFile; productRef = Q3TTS000000000000000011 /* MLXFast */; };
+		Q3TTS000000000000000020 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = Q3TTS000000000000000021 /* MLXLMCommon */; };
+		Q3TTS000000000000000030 /* Transformers in Frameworks */ = {isa = PBXBuildFile; productRef = Q3TTS000000000000000031 /* Transformers */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +62,9 @@
 			files = (
 				1CDCCBCA2F2CB3700033820A /* MLXNN in Frameworks */,
 				1CDCCBC82F2CB3700033820A /* MLX in Frameworks */,
+				Q3TTS000000000000000010 /* MLXFast in Frameworks */,
+				Q3TTS000000000000000020 /* MLXLMCommon in Frameworks */,
+				Q3TTS000000000000000030 /* Transformers in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -121,6 +127,9 @@
 			packageProductDependencies = (
 				1CDCCBC72F2CB3700033820A /* MLX */,
 				1CDCCBC92F2CB3700033820A /* MLXNN */,
+				Q3TTS000000000000000011 /* MLXFast */,
+				Q3TTS000000000000000021 /* MLXLMCommon */,
+				Q3TTS000000000000000031 /* Transformers */,
 			);
 			productName = VoiceClone;
 			productReference = 1C8FC9612F295CD2009D6580 /* VoiceClone.app */;
@@ -206,6 +215,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */,
+				Q3TTS000000000000000040 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
+				Q3TTS000000000000000050 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1C8FC9622F295CD2009D6580 /* Products */;
@@ -409,6 +420,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = VoiceClone/VoiceClone.macOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NLFUV2R63H;
@@ -429,7 +441,6 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.0;
-				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = VoiceClone/VoiceClone.macOS.entitlements;
 				PRODUCT_BUNDLE_IDENTIFIER = app.aer.VoiceClone;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -437,7 +448,7 @@
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
@@ -450,6 +461,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = VoiceClone/VoiceClone.macOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NLFUV2R63H;
@@ -470,7 +482,6 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.0;
-				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = VoiceClone/VoiceClone.macOS.entitlements;
 				PRODUCT_BUNDLE_IDENTIFIER = app.aer.VoiceClone;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -478,7 +489,7 @@
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
@@ -616,8 +627,24 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ml-explore/mlx-swift";
 			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.29.1;
+			};
+		};
+		Q3TTS000000000000000040 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples";
+			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.30.3;
+				minimumVersion = 2.29.0;
+			};
+		};
+		Q3TTS000000000000000050 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -632,6 +659,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */;
 			productName = MLXNN;
+		};
+		Q3TTS000000000000000011 /* MLXFast */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */;
+			productName = MLXFast;
+		};
+		Q3TTS000000000000000021 /* MLXLMCommon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = Q3TTS000000000000000040 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLMCommon;
+		};
+		Q3TTS000000000000000031 /* Transformers */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = Q3TTS000000000000000050 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Transformers;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

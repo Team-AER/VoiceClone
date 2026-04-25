@@ -105,7 +105,7 @@ Models are loaded from filesystem paths with a platform-aware fallback strategy 
 2. App bundle resources (physical device development builds)
 3. `$VOICECLONE_MODELS_DIR/<ModelName>/` — DEBUG env var override
 
-**Model Format**: MLX Swift API uses `.safetensors` format. Models are converted using `scripts/download_and_convert_fp16.py` which follows Apple's official MLX conversion pattern.
+**Model Format**: MLX Swift API uses `.safetensors` format. The app consumes the HuggingFace `Qwen/Qwen3-TTS-0.6B` safetensors **directly** — no Python conversion step. `ModelDownloadManager` fetches them at first launch. Tensor-key ↔ Swift coupling is encoded in `VoiceClone/Core/ML/MLX/WeightKeyMap.swift`; `VoiceCloneTests/WeightKeyAuditTests` verifies that coupling stays in sync with the downloaded weights.
 
 **File Naming Convention**:
 - Talker model files: `talker_config.json`, `talker_weights.safetensors` (FP16, 3.6GB, 404 tensors)
@@ -213,32 +213,26 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 - **Core Data**: Voice library persistence
 - **AVFoundation**: Audio playback and recording
 
-## Model Conversion
+## Models: direct from HuggingFace (no conversion)
 
-Models are converted from HuggingFace to MLX format using Apple's official conversion pattern:
+The app consumes `Qwen/Qwen3-TTS-0.6B` safetensors straight from HuggingFace — there is no Python conversion step. `ModelDownloadManager` downloads the four files below at first launch; `$VOICECLONE_MODELS_DIR` is the dev-time alternative (see `scripts/README.md`).
+
+| File | Source |
+|---|---|
+| `talker_config.json` | `huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/talker_config.json` |
+| `talker_weights.safetensors` (~3.6 GB) | `huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/talker_weights.safetensors` |
+| `decoder_config.json` | `huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_config.json` |
+| `decoder_weights.safetensors` (~436 MB) | `huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_weights.safetensors` |
+
+The coupling between the Swift inference code and the HuggingFace tensor names lives in `VoiceClone/Core/ML/MLX/WeightKeyMap.swift`. `VoiceCloneTests/WeightKeyAuditTests` asserts every key referenced by `generate()` is present in the loaded safetensors — run it when upgrading to a new model release:
 
 ```bash
-cd scripts
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install git+https://github.com/QwenLM/Qwen3-TTS.git
-
-# Convert Qwen3-TTS to FP16 MLX format
-python download_and_convert_fp16.py \
-    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --output ./mlx_models_fp16 \
-    --talker-only
+xcodebuild test -project VoiceClone.xcodeproj -scheme VoiceClone \
+  -destination 'platform=macOS,arch=arm64' \
+  -only-testing:VoiceCloneTests/WeightKeyAuditTests
 ```
 
-The conversion follows Apple's MLX standard:
-1. Load model with `from_pretrained()`
-2. Extract all weights via `state_dict()`
-3. Convert PyTorch tensors to numpy FP16
-4. Save as `.safetensors`
-
-**Result**: 404 tensors, 3.6GB FP16 model (no quantization)
-
-See `scripts/FINAL_SOLUTION.md` for details on why this approach is superior to quantized models.
+If the audit fails, update `WeightKeyMap.swift` to match the new tensor names.
 
 ## Production Deployment
 

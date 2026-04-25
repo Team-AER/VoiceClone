@@ -14,8 +14,13 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
 
-    private let engine = AVAudioEngine()
-    private let playerNode = AVAudioPlayerNode()
+    private lazy var playerNode = AVAudioPlayerNode()
+    private lazy var engine: AVAudioEngine = {
+        let e = AVAudioEngine()
+        e.attach(playerNode)
+        e.connect(playerNode, to: e.mainMixerNode, format: format)
+        return e
+    }()
     private let format: AVAudioFormat
 
     private var ticker: PlaybackTimeTicker?
@@ -29,13 +34,6 @@ final class AudioEngine: ObservableObject {
             channels: 1,
             interleaved: false
         )!
-
-        setupEngine()
-    }
-
-    private func setupEngine() {
-        engine.attach(playerNode)
-        engine.connect(playerNode, to: engine.mainMixerNode, format: format)
     }
 
     func playStream(_ stream: AsyncThrowingStream<AudioChunk, Error>) async throws {

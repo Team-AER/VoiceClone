@@ -1,154 +1,70 @@
 # VoiceClone Scripts
 
-This directory contains scripts for model conversion and utilities for the VoiceClone iOS app.
+Utility scripts for the VoiceClone app. **No Python is required to run the app** — models are downloaded by `ModelDownloadManager` at first launch directly from HuggingFace.
 
-## Model Conversion (Primary)
+## Model Weights
 
-### `download_and_convert_fp16.py`
+The Qwen3-TTS model weights live on HuggingFace and are consumed as-is (no conversion):
 
-**Purpose**: Convert Qwen3-TTS models to MLX FP16 format using Apple's official MLX conversion pattern.
+- https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/talker_config.json
+- https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/talker_weights.safetensors
+- https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_config.json
+- https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_weights.safetensors
 
-**Usage**:
-```bash
-# Setup environment
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install git+https://github.com/QwenLM/Qwen3-TTS.git
+See `VoiceClone/Core/ML/ModelDownloadManager.swift` for the download manifest.
 
-# Convert talker model
-python download_and_convert_fp16.py \
-    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --output ./mlx_models_fp16 \
-    --talker-only
-```
+### Dev setup (optional)
 
-**Output**:
-- `mlx_models_fp16/talker_weights.safetensors` (3.6GB, 404 tensors)
-- `mlx_models_fp16/talker_config.json`
-
-**Key Features**:
-- ✅ Uses Apple's official `state_dict()` pattern
-- ✅ Extracts all 404 model weights
-- ✅ FP16 format (no quantization)
-- ✅ Compatible with MLX Swift API
-- ✅ Simple and reliable
-
-**See**: `FINAL_SOLUTION.md` for complete details
-
-## Utility Scripts
-
-### `export_tokenizer.py`
-
-Export Qwen3-TTS tokenizer files for iOS app.
+To avoid downloading 4GB on first launch, set the `VOICECLONE_MODELS_DIR` env var in your Xcode scheme to a directory containing `Qwen3TTS_FP16/` and `Qwen3TTS_Decoder/` subdirs with the files above.
 
 ```bash
-python export_tokenizer.py \
-    --model Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
-    --output ../VoiceClone/Resources/Tokenizer
+# One-time manual download
+mkdir -p ~/models/VoiceClone/{Qwen3TTS_FP16,Qwen3TTS_Decoder}
+cd ~/models/VoiceClone/Qwen3TTS_FP16
+curl -LO https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/talker_config.json
+curl -LO https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/talker_weights.safetensors
+cd ../Qwen3TTS_Decoder
+curl -LO https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_config.json
+curl -LO https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_weights.safetensors
 ```
 
-### `update_xcode_settings.py`
+Then set `VOICECLONE_MODELS_DIR=/Users/you/models/VoiceClone` in the scheme environment.
 
-Update Xcode project settings programmatically.
+## Utilities
 
-## Test Scripts
+Two Python scripts are kept here as one-off dev utilities. They are NOT part of the runtime path and are not run during build:
 
-### `test_mlx_inference.py`
+- `export_tokenizer.py` — produced the bundled `VoiceClone/Resources/Tokenizer/*` files. The output files are already committed; you only need to re-run this if Qwen ships a tokenizer update.
+- `update_xcode_settings.py` — helper for batch-editing Xcode project settings.
 
-Test MLX model inference.
+## Tensor-key audit
 
-### `test_model_outputs.py`
+When the HuggingFace model format changes, the Swift weight-key mapping in `VoiceClone/Core/ML/MLX/WeightKeyMap.swift` may drift. Verify by running:
 
-Test CoreML model outputs.
-
-## Output Directory
-
-- `mlx_models_fp16/` - Converted FP16 models (3.6GB)
-  - `talker_weights.safetensors` - Talker model weights
-  - `talker_config.json` - Talker model configuration
-
-## Dependencies
-
-All Python dependencies are in `requirements.txt`:
 ```bash
-pip install -r requirements.txt
+xcodebuild test -project ../VoiceClone.xcodeproj -scheme VoiceClone \
+  -destination 'platform=macOS,arch=arm64' \
+  -only-testing:VoiceCloneTests/WeightKeyAuditTests
 ```
 
-Additional requirement for Qwen3-TTS:
+If `testTalkerRequiredKeysPresent` fails, update `WeightKeyMap.swift` to match the new state_dict. Inspect the raw keys with:
+
 ```bash
-pip install git+https://github.com/QwenLM/Qwen3-TTS.git
+python3 -c '
+import json, struct, sys
+with open(sys.argv[1], "rb") as f:
+    n = struct.unpack("<Q", f.read(8))[0]
+    h = json.loads(f.read(n))
+for k in sorted(k for k in h if k != "__metadata__"):
+    print(k, h[k]["shape"])
+' /path/to/talker_weights.safetensors | head
 ```
 
-## Architecture
+## Legacy output directories
 
-The conversion follows Apple's MLX standard pattern:
+The directories below are leftover from the old Python conversion pipeline and can be deleted when you no longer need them (each is several GB):
 
-```python
-# 1. Load model
-model = AutoModel.from_pretrained(model_name)
-
-# 2. Get all weights via state_dict()
-state_dict = model.state_dict()
-
-# 3. Convert to numpy FP16
-weights = {key: tensor.numpy() for key, tensor in state_dict.items()}
-
-# 4. Save as safetensors
-save_file(weights, output_path)
-```
-
-This is the same pattern used in:
-- `mlx-examples/bert/convert.py`
-- `mlx-lm/convert.py`
-- All official MLX conversions
-
-## Decoder/Vocoder Note
-
-The speech decoder (BigVGAN vocoder) weights are already present in:
-```
-VoiceClone/Resources/MLXModels/Qwen3TTS_Decoder/
-├── decoder_config.json
-└── decoder_weights.safetensors (436MB)
-```
-
-These can continue to be used with the new FP16 talker model.
-
-## Next Steps After Conversion
-
-1. Copy converted files to project:
-   ```bash
-   mkdir -p ../VoiceClone/Resources/MLXModels/Qwen3TTS_FP16
-   cp mlx_models_fp16/talker_* ../VoiceClone/Resources/MLXModels/Qwen3TTS_FP16/
-   ```
-
-2. Build and test on physical device (MLX requires Metal)
-
-3. Verify synthesis works correctly
-
-## Troubleshooting
-
-### "No module named 'qwen_tts'"
-```bash
-pip install git+https://github.com/QwenLM/Qwen3-TTS.git
-```
-
-### "No module named 'safetensors'"
-```bash
-pip install safetensors>=0.4.0
-```
-
-### "Out of memory during conversion"
-Close other applications. Conversion requires ~4GB RAM.
-
-## References
-
-- [FINAL_SOLUTION.md](FINAL_SOLUTION.md) - Complete explanation of the approach
-- [Apple MLX Examples](https://github.com/ml-explore/mlx-examples)
-- [MLX-LM Convert](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/convert.py)
-- [Using MLX at HuggingFace](https://huggingface.co/docs/hub/mlx)
-
----
-
-**Last Updated**: 2026-01-31
-**Status**: Production ready
+- `mlx_models_fp16/` — FP16 conversion output
+- `mlx_models_fp16_base/` — base variant
+- `mlx_models_fp16_custom/` — custom variant
+- `model_cache/` — HuggingFace cache

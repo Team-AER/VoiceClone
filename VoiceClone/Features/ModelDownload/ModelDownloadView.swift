@@ -29,6 +29,32 @@ struct ModelDownloadView: View {
             case .checking:
                 ProgressView("Checking for models…")
 
+            case .awaitingPermission:
+                VStack(spacing: 20) {
+                    VStack(spacing: 8) {
+                        Text("On-Device AI Models Required")
+                            .font(.headline)
+                        Text("VoiceClone needs to download ~4 GB of AI models to synthesize speech entirely on your device. No audio data ever leaves your Mac.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 360)
+                    }
+
+                    HStack(spacing: 12) {
+                        Image(systemName: "lock.shield")
+                        Text("4 GB · One-time download · Stored locally")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                    Button("Download Models") {
+                        downloadManager.startDownload()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+
             case .downloading(let file, _, let overall):
                 VStack(spacing: 12) {
                     ProgressView(value: overall)
