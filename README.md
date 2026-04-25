@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/screenshots/logo.png" alt="PolyJuiceVoice logo" width="160" />
+</p>
+
 # PolyJuiceVoice
 
 On-device text-to-speech for macOS (and iOS) with voice cloning and voice design,
