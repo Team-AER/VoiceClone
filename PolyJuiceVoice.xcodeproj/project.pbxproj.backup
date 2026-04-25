@@ -1,0 +1,633 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1CDCCBC82F2CB3700033820A /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 1CDCCBC72F2CB3700033820A /* MLX */; };
+		1CDCCBCA2F2CB3700033820A /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 1CDCCBC92F2CB3700033820A /* MLXNN */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1C8FC9712F295CD4009D6580 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1C8FC9592F295CD2009D6580 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1C8FC9602F295CD2009D6580;
+			remoteInfo = PolyJuiceVoice;
+		};
+		1C8FC97B2F295CD4009D6580 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1C8FC9592F295CD2009D6580 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1C8FC9602F295CD2009D6580;
+			remoteInfo = PolyJuiceVoice;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1C8FC9612F295CD2009D6580 /* PolyJuiceVoice.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PolyJuiceVoice.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1C8FC9702F295CD4009D6580 /* PolyJuiceVoiceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PolyJuiceVoiceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1C8FC97A2F295CD4009D6580 /* PolyJuiceVoiceUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PolyJuiceVoiceUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		1C8FC9632F295CD2009D6580 /* PolyJuiceVoice */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PolyJuiceVoice;
+			sourceTree = "<group>";
+		};
+		1C8FC9732F295CD4009D6580 /* PolyJuiceVoiceTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PolyJuiceVoiceTests;
+			sourceTree = "<group>";
+		};
+		1C8FC97D2F295CD4009D6580 /* PolyJuiceVoiceUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PolyJuiceVoiceUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1C8FC95E2F295CD2009D6580 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1CDCCBCA2F2CB3700033820A /* MLXNN in Frameworks */,
+				1CDCCBC82F2CB3700033820A /* MLX in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1C8FC96D2F295CD4009D6580 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1C8FC9772F295CD4009D6580 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1C8FC9582F295CD2009D6580 = {
+			isa = PBXGroup;
+			children = (
+				1C8FC9632F295CD2009D6580 /* PolyJuiceVoice */,
+				1C8FC9732F295CD4009D6580 /* PolyJuiceVoiceTests */,
+				1C8FC97D2F295CD4009D6580 /* PolyJuiceVoiceUITests */,
+				1C8FC9622F295CD2009D6580 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1C8FC9622F295CD2009D6580 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1C8FC9612F295CD2009D6580 /* PolyJuiceVoice.app */,
+				1C8FC9702F295CD4009D6580 /* PolyJuiceVoiceTests.xctest */,
+				1C8FC97A2F295CD4009D6580 /* PolyJuiceVoiceUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1C8FC9602F295CD2009D6580 /* PolyJuiceVoice */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1C8FC9842F295CD4009D6580 /* Build configuration list for PBXNativeTarget "PolyJuiceVoice" */;
+			buildPhases = (
+				1C8FC95D2F295CD2009D6580 /* Sources */,
+				1C8FC95E2F295CD2009D6580 /* Frameworks */,
+				1C8FC95F2F295CD2009D6580 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1C8FC9632F295CD2009D6580 /* PolyJuiceVoice */,
+			);
+			name = PolyJuiceVoice;
+			packageProductDependencies = (
+				1CDCCBC72F2CB3700033820A /* MLX */,
+				1CDCCBC92F2CB3700033820A /* MLXNN */,
+			);
+			productName = PolyJuiceVoice;
+			productReference = 1C8FC9612F295CD2009D6580 /* PolyJuiceVoice.app */;
+			productType = "com.apple.product-type.application";
+		};
+		1C8FC96F2F295CD4009D6580 /* PolyJuiceVoiceTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1C8FC9872F295CD4009D6580 /* Build configuration list for PBXNativeTarget "PolyJuiceVoiceTests" */;
+			buildPhases = (
+				1C8FC96C2F295CD4009D6580 /* Sources */,
+				1C8FC96D2F295CD4009D6580 /* Frameworks */,
+				1C8FC96E2F295CD4009D6580 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1C8FC9722F295CD4009D6580 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				1C8FC9732F295CD4009D6580 /* PolyJuiceVoiceTests */,
+			);
+			name = PolyJuiceVoiceTests;
+			packageProductDependencies = (
+			);
+			productName = PolyJuiceVoiceTests;
+			productReference = 1C8FC9702F295CD4009D6580 /* PolyJuiceVoiceTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		1C8FC9792F295CD4009D6580 /* PolyJuiceVoiceUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1C8FC98A2F295CD4009D6580 /* Build configuration list for PBXNativeTarget "PolyJuiceVoiceUITests" */;
+			buildPhases = (
+				1C8FC9762F295CD4009D6580 /* Sources */,
+				1C8FC9772F295CD4009D6580 /* Frameworks */,
+				1C8FC9782F295CD4009D6580 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1C8FC97C2F295CD4009D6580 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				1C8FC97D2F295CD4009D6580 /* PolyJuiceVoiceUITests */,
+			);
+			name = PolyJuiceVoiceUITests;
+			packageProductDependencies = (
+			);
+			productName = PolyJuiceVoiceUITests;
+			productReference = 1C8FC97A2F295CD4009D6580 /* PolyJuiceVoiceUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1C8FC9592F295CD2009D6580 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					1C8FC9602F295CD2009D6580 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					1C8FC96F2F295CD4009D6580 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 1C8FC9602F295CD2009D6580;
+					};
+					1C8FC9792F295CD4009D6580 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 1C8FC9602F295CD2009D6580;
+					};
+				};
+			};
+			buildConfigurationList = 1C8FC95C2F295CD2009D6580 /* Build configuration list for PBXProject "PolyJuiceVoice" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 1C8FC9582F295CD2009D6580;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1C8FC9622F295CD2009D6580 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1C8FC9602F295CD2009D6580 /* PolyJuiceVoice */,
+				1C8FC96F2F295CD4009D6580 /* PolyJuiceVoiceTests */,
+				1C8FC9792F295CD4009D6580 /* PolyJuiceVoiceUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1C8FC95F2F295CD2009D6580 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1C8FC96E2F295CD4009D6580 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1C8FC9782F295CD4009D6580 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1C8FC95D2F295CD2009D6580 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1C8FC96C2F295CD4009D6580 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1C8FC9762F295CD4009D6580 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1C8FC9722F295CD4009D6580 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1C8FC9602F295CD2009D6580 /* PolyJuiceVoice */;
+			targetProxy = 1C8FC9712F295CD4009D6580 /* PBXContainerItemProxy */;
+		};
+		1C8FC97C2F295CD4009D6580 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1C8FC9602F295CD2009D6580 /* PolyJuiceVoice */;
+			targetProxy = 1C8FC97B2F295CD4009D6580 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1C8FC9822F295CD4009D6580 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = NLFUV2R63H;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		1C8FC9832F295CD4009D6580 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = NLFUV2R63H;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		1C8FC9852F295CD4009D6580 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NLFUV2R63H;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PolyJuiceVoice needs microphone access to record reference audio for voice cloning.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "PolyJuiceVoice uses speech recognition to transcribe your reference audio.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIBackgroundModes = "audio processing";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aer.PolyJuiceVoice;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1C8FC9862F295CD4009D6580 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NLFUV2R63H;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PolyJuiceVoice needs microphone access to record reference audio for voice cloning.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "PolyJuiceVoice uses speech recognition to transcribe your reference audio.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIBackgroundModes = "audio processing";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aer.PolyJuiceVoice;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		1C8FC9882F295CD4009D6580 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NLFUV2R63H;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aer.PolyJuiceVoiceTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PolyJuiceVoice.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PolyJuiceVoice";
+			};
+			name = Debug;
+		};
+		1C8FC9892F295CD4009D6580 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NLFUV2R63H;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aer.PolyJuiceVoiceTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PolyJuiceVoice.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PolyJuiceVoice";
+			};
+			name = Release;
+		};
+		1C8FC98B2F295CD4009D6580 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NLFUV2R63H;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aer.PolyJuiceVoiceUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PolyJuiceVoice;
+			};
+			name = Debug;
+		};
+		1C8FC98C2F295CD4009D6580 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NLFUV2R63H;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aer.PolyJuiceVoiceUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PolyJuiceVoice;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1C8FC95C2F295CD2009D6580 /* Build configuration list for PBXProject "PolyJuiceVoice" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1C8FC9822F295CD4009D6580 /* Debug */,
+				1C8FC9832F295CD4009D6580 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1C8FC9842F295CD4009D6580 /* Build configuration list for PBXNativeTarget "PolyJuiceVoice" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1C8FC9852F295CD4009D6580 /* Debug */,
+				1C8FC9862F295CD4009D6580 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1C8FC9872F295CD4009D6580 /* Build configuration list for PBXNativeTarget "PolyJuiceVoiceTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1C8FC9882F295CD4009D6580 /* Debug */,
+				1C8FC9892F295CD4009D6580 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1C8FC98A2F295CD4009D6580 /* Build configuration list for PBXNativeTarget "PolyJuiceVoiceUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1C8FC98B2F295CD4009D6580 /* Debug */,
+				1C8FC98C2F295CD4009D6580 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.30.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1CDCCBC72F2CB3700033820A /* MLX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */;
+			productName = MLX;
+		};
+		1CDCCBC92F2CB3700033820A /* MLXNN */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1CDCCBC62F2CB3700033820A /* XCRemoteSwiftPackageReference "mlx-swift" */;
+			productName = MLXNN;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1C8FC9592F295CD2009D6580 /* Project object */;
+}

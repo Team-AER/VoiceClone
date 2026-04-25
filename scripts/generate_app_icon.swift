@@ -1,10 +1,10 @@
 // generate_app_icon.swift
 //
-// Renders the PolyjuiceVoice app icon at 1024×1024 PNG using CoreGraphics.
+// Renders the PolyJuiceVoice app icon at 1024×1024 PNG using CoreGraphics.
 // Run from a Mac:
 //   swift scripts/generate_app_icon.swift
 //
-// Output: VoiceClone/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+// Output: PolyJuiceVoice/Assets.xcassets/AppIcon.appiconset/icon-1024.png
 //
 // Design notes:
 //   * Polyjuice Potion is bubbling, viscous, and magical.
@@ -255,7 +255,7 @@ guard let cgImage = ctx.makeImage() else {
 }
 
 let outURL = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first
-    ?? "VoiceClone/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
+    ?? "PolyJuiceVoice/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
 
 try? FileManager.default.createDirectory(
     at: outURL.deletingLastPathComponent(),

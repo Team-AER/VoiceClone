@@ -2,7 +2,7 @@
 # Guard against reintroducing Python conversion/download scripts.
 #
 # The app consumes HuggingFace safetensors directly (see scripts/README.md and
-# VoiceClone/Core/ML/WeightKeyMap.swift). Python conversion wrappers were
+# PolyJuiceVoice/Core/ML/WeightKeyMap.swift). Python conversion wrappers were
 # removed because they silently masked Swift-side weight-key mismatches.
 #
 # Enable this hook once per clone:

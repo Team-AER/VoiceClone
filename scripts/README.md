@@ -1,6 +1,6 @@
-# VoiceClone Scripts
+# PolyJuiceVoice Scripts
 
-Utility scripts for the VoiceClone app. **No Python is required to run the app** — models are downloaded by `ModelDownloadManager` at first launch directly from HuggingFace.
+Utility scripts for the PolyJuiceVoice app. **No Python is required to run the app** — models are downloaded by `ModelDownloadManager` at first launch directly from HuggingFace.
 
 ## Model Weights
 
@@ -11,16 +11,16 @@ The Qwen3-TTS model weights live on HuggingFace and are consumed as-is (no conve
 - https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_config.json
 - https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_weights.safetensors
 
-See `VoiceClone/Core/ML/ModelDownloadManager.swift` for the download manifest.
+See `PolyJuiceVoice/Core/ML/ModelDownloadManager.swift` for the download manifest.
 
 ### Dev setup (optional)
 
-To avoid downloading 4GB on first launch, set the `VOICECLONE_MODELS_DIR` env var in your Xcode scheme to a directory containing `Qwen3TTS_FP16/` and `Qwen3TTS_Decoder/` subdirs with the files above.
+To avoid downloading 4GB on first launch, set the `POLYJUICEVOICE_MODELS_DIR` env var in your Xcode scheme to a directory containing `Qwen3TTS_FP16/` and `Qwen3TTS_Decoder/` subdirs with the files above.
 
 ```bash
 # One-time manual download
-mkdir -p ~/models/VoiceClone/{Qwen3TTS_FP16,Qwen3TTS_Decoder}
-cd ~/models/VoiceClone/Qwen3TTS_FP16
+mkdir -p ~/models/PolyJuiceVoice/{Qwen3TTS_FP16,Qwen3TTS_Decoder}
+cd ~/models/PolyJuiceVoice/Qwen3TTS_FP16
 curl -LO https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/talker_config.json
 curl -LO https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/talker_weights.safetensors
 cd ../Qwen3TTS_Decoder
@@ -28,23 +28,23 @@ curl -LO https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_config.
 curl -LO https://huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_weights.safetensors
 ```
 
-Then set `VOICECLONE_MODELS_DIR=/Users/you/models/VoiceClone` in the scheme environment.
+Then set `POLYJUICEVOICE_MODELS_DIR=/Users/you/models/PolyJuiceVoice` in the scheme environment.
 
 ## Utilities
 
 Two Python scripts are kept here as one-off dev utilities. They are NOT part of the runtime path and are not run during build:
 
-- `export_tokenizer.py` — produced the bundled `VoiceClone/Resources/Tokenizer/*` files. The output files are already committed; you only need to re-run this if Qwen ships a tokenizer update.
+- `export_tokenizer.py` — produced the bundled `PolyJuiceVoice/Resources/Tokenizer/*` files. The output files are already committed; you only need to re-run this if Qwen ships a tokenizer update.
 - `update_xcode_settings.py` — helper for batch-editing Xcode project settings.
 
 ## Tensor-key audit
 
-When the HuggingFace model format changes, the Swift weight-key mapping in `VoiceClone/Core/ML/MLX/WeightKeyMap.swift` may drift. Verify by running:
+When the HuggingFace model format changes, the Swift weight-key mapping in `PolyJuiceVoice/Core/ML/MLX/WeightKeyMap.swift` may drift. Verify by running:
 
 ```bash
-xcodebuild test -project ../VoiceClone.xcodeproj -scheme VoiceClone \
+xcodebuild test -project ../PolyJuiceVoice.xcodeproj -scheme PolyJuiceVoice \
   -destination 'platform=macOS,arch=arm64' \
-  -only-testing:VoiceCloneTests/WeightKeyAuditTests
+  -only-testing:PolyJuiceVoiceTests/WeightKeyAuditTests
 ```
 
 If `testTalkerRequiredKeysPresent` fails, update `WeightKeyMap.swift` to match the new state_dict. Inspect the raw keys with:

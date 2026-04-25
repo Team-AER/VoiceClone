@@ -1,6 +1,6 @@
 # Build and Run Guide
 
-Quick guide to build and run VoiceClone after recent updates.
+Quick guide to build and run PolyJuiceVoice after recent updates.
 
 ---
 
@@ -23,14 +23,14 @@ Quick guide to build and run VoiceClone after recent updates.
 ### 1. Clone and Prepare
 ```bash
 # Clone repository
-cd /Users/prakhar/Developer/AER/VoiceClone
+cd /Users/prakhar/Developer/AER/PolyJuiceVoice
 
 # Check git status
 git status
 
 # The following files should be modified:
 # - .gitignore (enhanced)
-# - VoiceClone.xcodeproj/project.pbxproj (settings updated)
+# - PolyJuiceVoice.xcodeproj/project.pbxproj (settings updated)
 # - CLAUDE.md (MLX documentation)
 # - Various Swift files (CoreML removal)
 ```
@@ -40,7 +40,7 @@ git status
 **Option A: Manual Download**
 ```bash
 # Create models directory
-mkdir -p VoiceClone/Resources/MLXModels
+mkdir -p PolyJuiceVoice/Resources/MLXModels
 
 # Download from Hugging Face or your storage
 # Models needed for the app bundle:
@@ -50,7 +50,7 @@ mkdir -p VoiceClone/Resources/MLXModels
 # - Qwen3TTS_Decoder (436MB) → models/MLXModels/Qwen3TTS_Decoder
 
 # Expected structure:
-# VoiceClone/Resources/MLXModels/
+# PolyJuiceVoice/Resources/MLXModels/
 #   ├── Qwen3TTS_INT4/
 #   │   ├── config.json
 #   │   └── weights.npz
@@ -64,17 +64,17 @@ mkdir -p VoiceClone/Resources/MLXModels
 **Option B: Use Pre-converted Models**
 ```bash
 # If models already converted in scripts/
-cp -r scripts/mlx_models/Qwen3TTS_INT4 VoiceClone/Resources/MLXModels/
+cp -r scripts/mlx_models/Qwen3TTS_INT4 PolyJuiceVoice/Resources/MLXModels/
 cp -r scripts/mlx_models/Qwen3TTS_Decoder models/MLXModels/
 ```
 
 ### 3. Open Project
 ```bash
 # Open in Xcode
-open VoiceClone.xcodeproj
+open PolyJuiceVoice.xcodeproj
 
 # Or use Xcode menu:
-# File → Open → Select VoiceClone.xcodeproj
+# File → Open → Select PolyJuiceVoice.xcodeproj
 ```
 
 ### 4. Resolve Packages
@@ -83,7 +83,7 @@ open VoiceClone.xcodeproj
 3. Wait for mlx-swift to download (~30 seconds)
 
 ### 5. Select Target Device
-- Top toolbar: Select "VoiceClone" scheme
+- Top toolbar: Select "PolyJuiceVoice" scheme
 - Select device: **iPhone 15 Pro** (simulator) or your physical device
 
 ---
@@ -94,8 +94,8 @@ open VoiceClone.xcodeproj
 ```bash
 # From command line:
 xcodebuild build \
-    -project VoiceClone.xcodeproj \
-    -scheme VoiceClone \
+    -project PolyJuiceVoice.xcodeproj \
+    -scheme PolyJuiceVoice \
     -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
 ```
 
@@ -105,8 +105,8 @@ xcodebuild build \
 
 # From command line:
 xcodebuild clean \
-    -project VoiceClone.xcodeproj \
-    -scheme VoiceClone
+    -project PolyJuiceVoice.xcodeproj \
+    -scheme PolyJuiceVoice
 ```
 
 ### Expected Build Time
@@ -127,8 +127,8 @@ xcodebuild clean \
 ```bash
 # Build and run in simulator
 xcodebuild test \
-    -project VoiceClone.xcodeproj \
-    -scheme VoiceClone \
+    -project PolyJuiceVoice.xcodeproj \
+    -scheme PolyJuiceVoice \
     -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
 ```
 
@@ -167,8 +167,8 @@ xcodebuild test \
 
 # From command line:
 xcodebuild test \
-    -project VoiceClone.xcodeproj \
-    -scheme VoiceClone \
+    -project PolyJuiceVoice.xcodeproj \
+    -scheme PolyJuiceVoice \
     -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
 ```
 
@@ -176,9 +176,9 @@ xcodebuild test \
 ```bash
 # Run only MLXTTSServiceTests
 xcodebuild test \
-    -project VoiceClone.xcodeproj \
-    -scheme VoiceClone \
-    -only-testing:VoiceCloneTests/MLXTTSServiceTests \
+    -project PolyJuiceVoice.xcodeproj \
+    -scheme PolyJuiceVoice \
+    -only-testing:PolyJuiceVoiceTests/MLXTTSServiceTests \
     -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
 ```
 
@@ -198,7 +198,7 @@ xcodebuild test \
 
 ### Issue: "Model file not found"
 **Solution**:
-1. Check `VoiceClone/Resources/MLXModels/` exists
+1. Check `PolyJuiceVoice/Resources/MLXModels/` exists
 2. Verify `config.json` and `weights.npz` are present
 3. In Xcode, verify folder is in project navigator
 4. Check Build Phases → Copy Bundle Resources
@@ -377,4 +377,4 @@ xcodebuild test \
 
 ---
 
-**Ready to build?** Open `VoiceClone.xcodeproj` and press **Cmd+R**! 🚀
+**Ready to build?** Open `PolyJuiceVoice.xcodeproj` and press **Cmd+R**! 🚀

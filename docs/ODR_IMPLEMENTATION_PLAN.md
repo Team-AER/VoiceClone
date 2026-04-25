@@ -39,7 +39,7 @@ ODR keeps the benefits of App Store distribution (CDN, code signing, app review)
 #### 1.1 Create ODR Directory Structure
 
 ```
-VoiceClone/
+PolyJuiceVoice/
 ├── Resources/
 │   └── ODRModels/              # NEW: ODR-tagged resources
 │       ├── Qwen3TTS_INT4/
@@ -60,7 +60,7 @@ VoiceClone/
 
 #### 1.3 Configure Build Settings
 
-In `VoiceClone.xcodeproj`:
+In `PolyJuiceVoice.xcodeproj`:
 - Enable: **Build Settings → Enable On Demand Resources** = `YES`
 - Set: **Build Settings → On Demand Resources Initial Install Tags** = (empty for deferred download)
 - Set: **Build Settings → On Demand Resources Prefetch Order** = `tts_model_talker, tts_model_decoder`
@@ -71,7 +71,7 @@ In `VoiceClone.xcodeproj`:
 
 #### 2.1 Create ODRManager Actor
 
-Create `VoiceClone/Core/ML/ODR/ODRManager.swift`:
+Create `PolyJuiceVoice/Core/ML/ODR/ODRManager.swift`:
 
 ```swift
 import Foundation
@@ -267,7 +267,7 @@ final class ODRManager: ObservableObject {
 
 #### 2.2 Create Download UI View
 
-Create `VoiceClone/Features/Onboarding/ModelDownloadView.swift`:
+Create `PolyJuiceVoice/Features/Onboarding/ModelDownloadView.swift`:
 
 ```swift
 import SwiftUI
@@ -291,7 +291,7 @@ struct ModelDownloadView: View {
                     .font(.title)
                     .fontWeight(.bold)
 
-                Text("VoiceClone needs to download AI models to generate speech on your device.")
+                Text("PolyJuiceVoice needs to download AI models to generate speech on your device.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -519,11 +519,11 @@ extension MLXTTSService {
 
 #### 4.1 Update App Entry Point
 
-Modify `VoiceCloneApp.swift`:
+Modify `PolyJuiceVoiceApp.swift`:
 
 ```swift
 @main
-struct VoiceCloneApp: App {
+struct PolyJuiceVoiceApp: App {
     @StateObject private var odrManager = ODRManager()
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 

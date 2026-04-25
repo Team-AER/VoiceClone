@@ -1,4 +1,4 @@
-# PolyjuiceVoice — App Store Connect metadata
+# PolyJuiceVoice — App Store Connect metadata
 
 Drop these straight into App Store Connect for the 1.0.0 submission.
 
@@ -7,7 +7,7 @@ Drop these straight into App Store Connect for the 1.0.0 submission.
 ## App Name (max 30 chars)
 
 ```
-PolyjuiceVoice
+PolyJuiceVoice
 ```
 
 ## Subtitle (max 30 chars)
@@ -25,13 +25,13 @@ Take on any voice, design new ones from a description, or speak in a built-in st
 ## Description (max 4000 chars)
 
 ```
-PolyjuiceVoice is on-device text-to-speech with three magical capabilities — built on Apple's MLX framework so every word is synthesized locally on your Mac or iPhone. Your text and recordings never leave the device.
+PolyJuiceVoice is on-device text-to-speech with three magical capabilities — built on Apple's MLX framework so every word is synthesized locally on your Mac or iPhone. Your text and recordings never leave the device.
 
 — SPEAK —
 Pick a built-in voice and read any text aloud, with optional style guidance like "calm and warm" or "energetic and confident." Long passages stream as they're generated, so you hear the first sentence in seconds.
 
 — DESIGN —
-Describe the voice you want — "a wise narrator with a slight British lilt" — and PolyjuiceVoice generates a brand-new speaker that matches. Save it to your library and re-use it for any future text.
+Describe the voice you want — "a wise narrator with a slight British lilt" — and PolyJuiceVoice generates a brand-new speaker that matches. Save it to your library and re-use it for any future text.
 
 — CLONE —
 Record a few seconds of any voice (your own, with consent), then synthesize new sentences in that voice. Perfect for personal voice messages, accessibility, audiobook drafts, or character voices for storytelling.
@@ -42,12 +42,12 @@ Record a few seconds of any voice (your own, with consent), then synthesize new 
 • Models download once from Hugging Face on first launch (~4 GB) and stay local forever after.
 
 — BUILT FOR APPLE SILICON —
-PolyjuiceVoice uses Metal-accelerated inference via Apple's MLX framework for fast, energy-efficient synthesis. Designed for iOS 26 and macOS 26 with Liquid Glass throughout.
+PolyJuiceVoice uses Metal-accelerated inference via Apple's MLX framework for fast, energy-efficient synthesis. Designed for iOS 26 and macOS 26 with Liquid Glass throughout.
 
 — FOR EVERYONE —
 Built-in voices speak in English, Chinese, Japanese, Korean, Spanish, French, and German. Save unlimited voices to your personal library, export to WAV, and share generated audio anywhere.
 
-PolyjuiceVoice is built on the open-source Qwen3-TTS model (Apache 2.0).
+PolyJuiceVoice is built on the open-source Qwen3-TTS model (Apache 2.0).
 
 Requires Apple Silicon. iOS Simulator is not supported.
 ```
@@ -81,7 +81,7 @@ https://github.com/prakharshukla/polyjuicevoice/blob/main/PRIVACY.md
 ## What's New in This Version (max 4000 chars — for 1.0.0)
 
 ```
-✨ The first public release of PolyjuiceVoice.
+✨ The first public release of PolyJuiceVoice.
 
 • Speak with built-in voices (Vivian, Ryan, and more) in 7 languages
 • Design new voices from a free-text description
@@ -148,7 +148,7 @@ The app's UI uses `LocalizedStringKey` literals throughout, so adding a
 language is purely a translation exercise:
 
 1. In Xcode: File → New → File → String Catalog. Already added at
-   `VoiceClone/Resources/Localizable.xcstrings` (empty — Xcode auto-fills
+   `PolyJuiceVoice/Resources/Localizable.xcstrings` (empty — Xcode auto-fills
    on next build).
 2. After the next build, every UI string appears in the catalog.
 3. Add target languages (Spanish, Mandarin, Japanese suggested first).

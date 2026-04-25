@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Update Xcode project settings for VoiceClone MLX project
+Update Xcode project settings for PolyJuiceVoice MLX project
 """
 
 import sys
@@ -73,7 +73,7 @@ def update_project_file(project_path: str):
     return True
 
 def main():
-    project_path = Path(__file__).parent.parent / "VoiceClone.xcodeproj" / "project.pbxproj"
+    project_path = Path(__file__).parent.parent / "PolyJuiceVoice.xcodeproj" / "project.pbxproj"
     
     if not project_path.exists():
         print(f"Error: Project file not found at {project_path}")
@@ -86,7 +86,7 @@ def main():
         update_project_file(str(project_path))
         print("\n✓ Xcode project settings updated successfully")
         print("\nNext steps:")
-        print("  1. Open VoiceClone.xcodeproj in Xcode")
+        print("  1. Open PolyJuiceVoice.xcodeproj in Xcode")
         print("  2. Verify mlx-swift package is resolved")
         print("  3. Add MLXModels folder to project if not already added")
         print("  4. Build and test")

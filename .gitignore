@@ -98,9 +98,9 @@ temp/
 logs/
 
 # MLX Models (large files - download separately)
-VoiceClone/Resources/MLXModels/*/weights.npz
-VoiceClone/Resources/MLXModels/*/weights.pkl
-VoiceClone/ODRModels/
+PolyJuiceVoice/Resources/MLXModels/*/weights.npz
+PolyJuiceVoice/Resources/MLXModels/*/weights.pkl
+PolyJuiceVoice/ODRModels/
 scripts/mlx_models/*/weights.npz
 scripts/mlx_models/*/weights.pkl
 *.npz

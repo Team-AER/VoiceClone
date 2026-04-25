@@ -1,8 +1,8 @@
-# VoiceClone iOS App — PRD & Technical Architecture
+# PolyJuiceVoice iOS App — PRD & Technical Architecture
 
 ## Executive Summary
 
-**VoiceClone** is a production-ready, open-source iOS application enabling on-device text-to-speech synthesis with voice cloning and voice design capabilities. Powered by Qwen3-TTS models running locally via CoreML/Metal, it requires no internet connection and keeps all voice data on-device.
+**PolyJuiceVoice** is a production-ready, open-source iOS application enabling on-device text-to-speech synthesis with voice cloning and voice design capabilities. Powered by Qwen3-TTS models running locally via CoreML/Metal, it requires no internet connection and keeps all voice data on-device.
 
 **License**: Apache 2.0
 **Platform**: iOS 17.0+ (iPhone/iPad)
@@ -54,7 +54,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        VoiceClone App                           │
+│                        PolyJuiceVoice App                           │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
 │  │   SwiftUI   │  │  Voice      │  │   Audio                 │  │
@@ -194,9 +194,9 @@ quantized_model.save("Qwen3TTS_INT4.mlpackage")
 ### 2.4 iOS Project Structure
 
 ```
-VoiceClone/
+PolyJuiceVoice/
 ├── App/
-│   ├── VoiceCloneApp.swift              # @main entry
+│   ├── PolyJuiceVoiceApp.swift              # @main entry
 │   ├── AppState.swift                   # Global app state
 │   └── Environment/
 │       ├── DIContainer.swift            # Dependency injection
@@ -221,13 +221,13 @@ VoiceClone/
 │   │   └── ViewModels/
 │   │       └── VoiceDesignViewModel.swift
 │   │
-│   ├── VoiceClone/
+│   ├── VoiceCloning/
 │   │   ├── Views/
-│   │   │   ├── VoiceCloneView.swift     # Clone from audio
+│   │   │   ├── VoiceCloningView.swift     # Clone from audio
 │   │   │   ├── AudioRecorderView.swift  # Record reference
 │   │   │   └── AudioImportView.swift    # Import from files
 │   │   └── ViewModels/
-│   │       └── VoiceCloneViewModel.swift
+│   │       └── VoiceCloningViewModel.swift
 │   │
 │   └── Library/
 │       ├── Views/
@@ -737,7 +737,7 @@ actor ModelDownloadManager {
         let url: URL
     }
 
-    private let modelManifestURL = URL(string: "https://huggingface.co/YourOrg/VoiceClone-iOS/resolve/main/manifest.json")!
+    private let modelManifestURL = URL(string: "https://huggingface.co/YourOrg/PolyJuiceVoice-iOS/resolve/main/manifest.json")!
 
     @Published private(set) var downloadProgress: [String: Double] = [:]
 
@@ -1152,7 +1152,7 @@ python quantize_coreml.py \
 ### 6.3 Open Source Deliverables
 
 ```
-VoiceClone/
+PolyJuiceVoice/
 ├── LICENSE                    # Apache 2.0
 ├── README.md                  # Setup & usage guide
 ├── CONTRIBUTING.md            # Contribution guidelines
@@ -1165,7 +1165,7 @@ VoiceClone/
 │   ├── convert_models.py      # ONNX → CoreML conversion
 │   ├── quantize.py            # INT4 quantization
 │   └── benchmark.py           # Performance benchmarks
-└── VoiceClone.xcodeproj/      # iOS app project
+└── PolyJuiceVoice.xcodeproj/      # iOS app project
 ```
 
 ---

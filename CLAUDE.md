@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VoiceClone is a **macOS-first** (also iOS) app for on-device text-to-speech synthesis with voice cloning and voice design capabilities. It uses MLX (Apple's machine learning framework) to run Qwen3-TTS models locally via Metal acceleration.
+PolyJuiceVoice is a **macOS-first** (also iOS) app for on-device text-to-speech synthesis with voice cloning and voice design capabilities. It uses MLX (Apple's machine learning framework) to run Qwen3-TTS models locally via Metal acceleration.
 
 **Platform**: macOS 26+ (primary), iOS 26+ (secondary — maintained via `#if os(...)` conditionals)
 **Language**: Swift 6.0 (strict concurrency enabled)
@@ -18,14 +18,14 @@ VoiceClone is a **macOS-first** (also iOS) app for on-device text-to-speech synt
 ```bash
 # Build for macOS (primary target — runs directly, no device needed)
 xcodebuild build \
-  -project VoiceClone.xcodeproj \
-  -scheme VoiceClone \
+  -project PolyJuiceVoice.xcodeproj \
+  -scheme PolyJuiceVoice \
   -destination 'platform=macOS,arch=arm64'
 
 # Build for physical iOS device (MLX needs Metal hardware)
 xcodebuild build \
-  -project VoiceClone.xcodeproj \
-  -scheme VoiceClone \
+  -project PolyJuiceVoice.xcodeproj \
+  -scheme PolyJuiceVoice \
   -destination 'generic/platform=iOS'
 ```
 
@@ -33,28 +33,28 @@ xcodebuild build \
 
 ### Model Setup for Development (macOS)
 
-Set `VOICECLONE_MODELS_DIR` in your Xcode scheme's environment variables to the directory containing `Qwen3TTS_FP16/` and `Qwen3TTS_Decoder/` subdirectories:
+Set `POLYJUICEVOICE_MODELS_DIR` in your Xcode scheme's environment variables to the directory containing `Qwen3TTS_FP16/` and `Qwen3TTS_Decoder/` subdirectories:
 
 ```
-VOICECLONE_MODELS_DIR=/path/to/models/MLXModels
+POLYJUICEVOICE_MODELS_DIR=/path/to/models/MLXModels
 ```
 
-In production the app downloads models on first launch to `~/Library/Application Support/VoiceClone/MLXModels/`.
+In production the app downloads models on first launch to `~/Library/Application Support/PolyJuiceVoice/MLXModels/`.
 
 ### Running Tests
 
 ```bash
 # Run tests on macOS (preferred — no device needed)
 xcodebuild test \
-  -project VoiceClone.xcodeproj \
-  -scheme VoiceClone \
+  -project PolyJuiceVoice.xcodeproj \
+  -scheme PolyJuiceVoice \
   -destination 'platform=macOS,arch=arm64' \
-  -only-testing:VoiceCloneTests
+  -only-testing:PolyJuiceVoiceTests
 
 # Run tests on physical iOS device
 xcodebuild test \
-  -project VoiceClone.xcodeproj \
-  -scheme VoiceClone \
+  -project PolyJuiceVoice.xcodeproj \
+  -scheme PolyJuiceVoice \
   -destination 'platform=iOS,name=Your Device Name'
 ```
 
@@ -69,26 +69,26 @@ xcodebuild test \
 
 ### Core Components
 
-1. **MLX Integration** (`VoiceClone/Core/ML/MLX/`)
+1. **MLX Integration** (`PolyJuiceVoice/Core/ML/MLX/`)
    - `MLXTTSService.swift`: Main TTS service actor (MainActor isolated)
    - `MLXQwen3TTSModel.swift`: MLX-based transformer implementation (actor isolated)
    - `MLXSpeechDecoder.swift`: Audio decoder (Snake activation + ResidualVectorQuantizer)
    - `ConvLayers.swift`, `SnakeActivation.swift`, `ResidualVectorQuantizer.swift`: Neural network layers
 
-2. **Audio Pipeline** (`VoiceClone/Core/Audio/`)
+2. **Audio Pipeline** (`PolyJuiceVoice/Core/Audio/`)
    - `AudioEngine.swift`: AVAudioEngine wrapper for playback
    - `AudioRecorder.swift`: Recording for voice cloning
    - `AudioExporter.swift`: Export to WAV/M4A
 
-3. **Storage** (`VoiceClone/Core/Storage/`)
+3. **Storage** (`PolyJuiceVoice/Core/Storage/`)
    - `CoreDataStack.swift`: Core Data setup
    - `VoiceStorage.swift`: Voice library persistence
    - `VoiceEntity.swift`: Core Data entity
 
-4. **Features** (`VoiceClone/Features/`)
+4. **Features** (`PolyJuiceVoice/Features/`)
    - `Synthesis/`: Text-to-speech synthesis UI
    - `VoiceDesign/`: Create voices from text descriptions
-   - `VoiceClone/`: Clone voices from audio samples
+   - `VoiceCloning/`: Clone voices from audio samples
    - `VoiceLibrary/`: Manage saved voices
 
 ### Model Loading Architecture
@@ -96,16 +96,16 @@ xcodebuild test \
 Models are loaded from filesystem paths with a platform-aware fallback strategy (see `MLXTTSService.swift`):
 
 **macOS path priority:**
-1. `~/Library/Application Support/VoiceClone/MLXModels/` — managed by `ModelDownloadManager` (production)
+1. `~/Library/Application Support/PolyJuiceVoice/MLXModels/` — managed by `ModelDownloadManager` (production)
 2. App bundle resources (development only)
-3. `$VOICECLONE_MODELS_DIR/<ModelName>/` — DEBUG env var override for Xcode development
+3. `$POLYJUICEVOICE_MODELS_DIR/<ModelName>/` — DEBUG env var override for Xcode development
 
 **iOS path priority:**
 1. Documents directory — managed by `ModelDownloadManager`
 2. App bundle resources (physical device development builds)
-3. `$VOICECLONE_MODELS_DIR/<ModelName>/` — DEBUG env var override
+3. `$POLYJUICEVOICE_MODELS_DIR/<ModelName>/` — DEBUG env var override
 
-**Model Format**: MLX Swift API uses `.safetensors` format. The app consumes the HuggingFace `Qwen/Qwen3-TTS-0.6B` safetensors **directly** — no Python conversion step. `ModelDownloadManager` fetches them at first launch. Tensor-key ↔ Swift coupling is encoded in `VoiceClone/Core/ML/MLX/WeightKeyMap.swift`; `VoiceCloneTests/WeightKeyAuditTests` verifies that coupling stays in sync with the downloaded weights.
+**Model Format**: MLX Swift API uses `.safetensors` format. The app consumes the HuggingFace `Qwen/Qwen3-TTS-0.6B` safetensors **directly** — no Python conversion step. `ModelDownloadManager` fetches them at first launch. Tensor-key ↔ Swift coupling is encoded in `PolyJuiceVoice/Core/ML/MLX/WeightKeyMap.swift`; `PolyJuiceVoiceTests/WeightKeyAuditTests` verifies that coupling stays in sync with the downloaded weights.
 
 **File Naming Convention**:
 - Talker model files: `talker_config.json`, `talker_weights.safetensors` (FP16, 3.6GB, 404 tensors)
@@ -159,7 +159,7 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 ## File Organization Rules
 
 ### Model File Management
-- **Development**: Models MUST be in `VoiceClone/Resources/MLXModels/` for testing on physical devices (required for MLX/Metal). Physical devices cannot access the Mac's filesystem.
+- **Development**: Models MUST be in `PolyJuiceVoice/Resources/MLXModels/` for testing on physical devices (required for MLX/Metal). Physical devices cannot access the Mac's filesystem.
 - **Production**: Models are downloaded via ODR (On-Demand Resources) to Documents directory, NOT bundled in the IPA.
 - **Git**: `.gitignore` excludes `.safetensors`, `.npz`, and `.pkl` files to prevent large files from being committed.
 - **File naming**: Models use unique prefixes (`talker_*`, `decoder_*`) to prevent Xcode build conflicts when multiple models are bundled.
@@ -172,7 +172,7 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 ## Common Development Tasks
 
 ### Adding a New MLX Layer
-1. Create in `VoiceClone/Core/ML/MLX/Layers/`
+1. Create in `PolyJuiceVoice/Core/ML/MLX/Layers/`
 2. Use `nonisolated` functions for stateless operations
 3. Use `nonisolated(unsafe)` for stored properties if needed (e.g., `Conv1d` modules)
 4. Ensure all MLXArray operations are thread-safe
@@ -183,7 +183,7 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 3. Always configure audio session: `.playback` category, `.spokenAudio` mode
 
 ### Adding New Voice Presets
-1. Update `PresetVoice` enum in `VoiceClone/Core/Models/PresetVoice.swift`
+1. Update `PresetVoice` enum in `PolyJuiceVoice/Core/Models/PresetVoice.swift`
 2. Add voice metadata to tokenizer prompt templates if needed
 
 ## Testing Strategy
@@ -215,7 +215,7 @@ Using mlx-swift v0.30.3. Key API differences from older versions:
 
 ## Models: direct from HuggingFace (no conversion)
 
-The app consumes `Qwen/Qwen3-TTS-0.6B` safetensors straight from HuggingFace — there is no Python conversion step. `ModelDownloadManager` downloads the four files below at first launch; `$VOICECLONE_MODELS_DIR` is the dev-time alternative (see `scripts/README.md`).
+The app consumes `Qwen/Qwen3-TTS-0.6B` safetensors straight from HuggingFace — there is no Python conversion step. `ModelDownloadManager` downloads the four files below at first launch; `$POLYJUICEVOICE_MODELS_DIR` is the dev-time alternative (see `scripts/README.md`).
 
 | File | Source |
 |---|---|
@@ -224,12 +224,12 @@ The app consumes `Qwen/Qwen3-TTS-0.6B` safetensors straight from HuggingFace —
 | `decoder_config.json` | `huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_config.json` |
 | `decoder_weights.safetensors` (~436 MB) | `huggingface.co/Qwen/Qwen3-TTS-0.6B/resolve/main/decoder_weights.safetensors` |
 
-The coupling between the Swift inference code and the HuggingFace tensor names lives in `VoiceClone/Core/ML/MLX/WeightKeyMap.swift`. `VoiceCloneTests/WeightKeyAuditTests` asserts every key referenced by `generate()` is present in the loaded safetensors — run it when upgrading to a new model release:
+The coupling between the Swift inference code and the HuggingFace tensor names lives in `PolyJuiceVoice/Core/ML/MLX/WeightKeyMap.swift`. `PolyJuiceVoiceTests/WeightKeyAuditTests` asserts every key referenced by `generate()` is present in the loaded safetensors — run it when upgrading to a new model release:
 
 ```bash
-xcodebuild test -project VoiceClone.xcodeproj -scheme VoiceClone \
+xcodebuild test -project PolyJuiceVoice.xcodeproj -scheme PolyJuiceVoice \
   -destination 'platform=macOS,arch=arm64' \
-  -only-testing:VoiceCloneTests/WeightKeyAuditTests
+  -only-testing:PolyJuiceVoiceTests/WeightKeyAuditTests
 ```
 
 If the audit fails, update `WeightKeyMap.swift` to match the new tensor names.
