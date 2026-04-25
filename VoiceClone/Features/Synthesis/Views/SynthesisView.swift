@@ -9,27 +9,59 @@ struct SynthesisView: View {
 
     @StateObject private var viewModel = SynthesisViewModel()
     @EnvironmentObject var container: DIContainer
+    @EnvironmentObject var downloadManager: ModelDownloadManager
+
+    @State private var showingModelManager = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
                 voiceSelector
-                textEditor
-                instructionField
-                languageSelector
-                waveformDisplay
-                controlButtons
-                synthesizeButton
+                if let missing = viewModel.missingSnapshot {
+                    MissingSnapshotPrompt(snapshot: missing) {
+                        showingModelManager = true
+                    }
+                } else {
+                    textEditor
+                    instructionField
+                    languageSelector
+                    waveformDisplay
+                    controlButtons
+                    synthesizeButton
+                }
+                Spacer(minLength: 0)
             }
             .padding()
             .navigationTitle("Speak")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showingModelManager = true
+                    } label: {
+                        Image(systemName: "icloud.and.arrow.down")
+                    }
+                    .help("Manage models")
+                }
+            }
             .task {
-                await viewModel.setup(ttsService: container.ttsService, audioEngine: container.audioEngine)
+                await viewModel.setup(
+                    ttsService: container.ttsService,
+                    audioEngine: container.audioEngine,
+                    voiceStorage: container.voiceStorage,
+                    downloadManager: downloadManager
+                )
+            }
+            .onAppear {
+                Task { await viewModel.reloadVoiceOptions() }
             }
             .alert("Error", isPresented: errorBinding) {
                 Button("OK") { viewModel.clearError() }
             } message: {
                 Text(viewModel.error ?? "")
+            }
+            .sheet(isPresented: $showingModelManager, onDismiss: viewModel.retrySetup) {
+                ModelManagerView(highlight: viewModel.missingSnapshot)
+                    .environmentObject(downloadManager)
             }
         }
     }
@@ -49,20 +81,31 @@ struct SynthesisView: View {
                 .foregroundStyle(.secondary)
 
             Menu {
-                ForEach(PresetVoice.allCases, id: \.self) { voice in
-                    Button(voice.rawValue) {
-                        viewModel.selectedVoice = voice
+                Section("Presets") {
+                    ForEach(viewModel.voiceOptions.filter { if case .preset = $0 { return true } else { return false } }) { option in
+                        Button(option.name) { viewModel.selectedOption = option }
+                    }
+                }
+
+                let savedOptions = viewModel.voiceOptions.filter {
+                    if case .saved = $0 { return true } else { return false }
+                }
+                if !savedOptions.isEmpty {
+                    Section("Your Voices") {
+                        ForEach(savedOptions) { option in
+                            Button(option.name) { viewModel.selectedOption = option }
+                        }
                     }
                 }
 
                 Divider()
 
-                NavigationLink("Custom Voices...") {
+                NavigationLink("Open Library…") {
                     VoiceLibraryView()
                 }
             } label: {
                 HStack {
-                    Text(viewModel.selectedVoice.rawValue)
+                    Text(viewModel.selectedOption.name)
                         .fontWeight(.medium)
                     Image(systemName: "chevron.down")
                         .font(.caption)
@@ -96,13 +139,21 @@ struct SynthesisView: View {
     }
 
     private var instructionField: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Style instruction (optional)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        // Only meaningful for preset voices — saved voices already encode their style.
+        let isPreset: Bool = {
+            if case .preset = viewModel.selectedOption { return true } else { return false }
+        }()
+        return Group {
+            if isPreset {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Style instruction (optional)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
 
-            TextField("e.g. Calm and warm", text: $viewModel.instruction)
-                .textFieldStyle(.roundedBorder)
+                    TextField("e.g. Calm and warm", text: $viewModel.instruction)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
         }
     }
 
@@ -206,4 +257,5 @@ struct SynthesisView: View {
 #Preview {
     SynthesisView()
         .environmentObject(DIContainer())
+        .environmentObject(ModelDownloadManager())
 }

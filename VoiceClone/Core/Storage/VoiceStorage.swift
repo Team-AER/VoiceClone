@@ -49,11 +49,14 @@ actor VoiceStorage {
     }
 
     func fetchVoices() async throws -> [Voice] {
-        try await CoreDataStack.shared.performBackgroundTask { context in
+        let dir = voicesDirectory
+        return try await CoreDataStack.shared.performBackgroundTask { context in
             let request = NSFetchRequest<VoiceEntity>(entityName: "VoiceEntity")
             request.sortDescriptors = [NSSortDescriptor(keyPath: \VoiceEntity.createdAt, ascending: false)]
 
             let entities = try context.fetch(request)
+            // FileManager.default is fine off-actor; we don't capture self.
+            let fm = FileManager.default
 
             return entities.compactMap { entity -> Voice? in
                 guard let id = entity.id,
@@ -66,6 +69,14 @@ actor VoiceStorage {
                     return nil
                 }
 
+                // Hydrate reference audio + embedding from disk.
+                let audioURL = dir.appendingPathComponent("\(id).wav")
+                let referenceAudioURL = fm.fileExists(atPath: audioURL.path) ? audioURL : nil
+                let embeddingURL = dir.appendingPathComponent("\(id).embedding")
+                let embeddingData = fm.fileExists(atPath: embeddingURL.path)
+                    ? try? Data(contentsOf: embeddingURL)
+                    : nil
+
                 return Voice(
                     id: id,
                     name: name,
@@ -73,11 +84,20 @@ actor VoiceStorage {
                     language: language,
                     createdAt: createdAt,
                     instruction: entity.instruction,
-                    referenceAudioURL: nil,
-                    embeddingData: nil
+                    referenceAudioURL: referenceAudioURL,
+                    embeddingData: embeddingData
                 )
             }
         }
+    }
+
+    /// Load the on-disk reference audio bytes for a saved voice.
+    /// Returns nil when the voice has no reference recording (e.g. an
+    /// instruction-only "designed" voice).
+    func referenceAudioData(for voiceID: UUID) async throws -> Data? {
+        let url = voicesDirectory.appendingPathComponent("\(voiceID).wav")
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        return try Data(contentsOf: url)
     }
 
     func deleteVoice(_ id: UUID) async throws {

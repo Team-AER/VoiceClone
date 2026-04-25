@@ -21,28 +21,39 @@ final class VoiceDesignViewModel: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var exportURL: URL?
 
+    /// When non-nil, the required model snapshot is missing. The view should
+    /// render `MissingSnapshotPrompt(snapshot:)` instead of the synth UI.
+    @Published private(set) var missingSnapshot: ModelSnapshot?
+
+    /// Set after a successful synthesis so the view can show "Save voice".
+    @Published private(set) var canSaveVoice = false
+
     private var ttsService: MLXTTSService?
     private var audioEngine: AudioEngine?
+    private var voiceStorage: VoiceStorage?
+    private weak var downloadManager: ModelDownloadManager?
     private var generatedChunks: [AudioChunk] = []
     private var generatedSamples: [Float] = []
     private var cancellables = Set<AnyCancellable>()
 
     var canSynthesize: Bool {
+        missingSnapshot == nil &&
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !isSynthesizing &&
         ttsService?.state == .ready
     }
 
-    func setup(ttsService: MLXTTSService, audioEngine: AudioEngine) async {
+    func setup(ttsService: MLXTTSService,
+               audioEngine: AudioEngine,
+               voiceStorage: VoiceStorage,
+               downloadManager: ModelDownloadManager) async {
         self.ttsService = ttsService
         self.audioEngine = audioEngine
+        self.voiceStorage = voiceStorage
+        self.downloadManager = downloadManager
 
-        do {
-            try await ttsService.loadCapability(.voiceDesign)
-        } catch {
-            self.error = error.localizedDescription
-        }
+        await loadCapability()
 
         ttsService.$state
             .receive(on: DispatchQueue.main)
@@ -79,12 +90,45 @@ final class VoiceDesignViewModel: ObservableObject {
                 self?.playbackProgress = min(1, max(0, current / duration))
             }
             .store(in: &cancellables)
+
+        // Re-attempt capability load whenever a new snapshot finishes
+        // downloading — flips the UI from "missing" → "ready" automatically.
+        downloadManager.$snapshotStates
+            .map { $0[ModelSnapshot.voiceDesign] }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self else { return }
+                if case .installed = state, self.missingSnapshot != nil {
+                    Task { await self.loadCapability() }
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Re-attempt model load — call after the user dismisses the Model
+    /// Manager sheet so the tab unblocks immediately if the download landed.
+    func retrySetup() {
+        Task { await loadCapability() }
+    }
+
+    private func loadCapability() async {
+        guard let tts = ttsService else { return }
+        do {
+            try await tts.loadCapability(.voiceDesign)
+            missingSnapshot = nil
+        } catch let TTSError.snapshotNotInstalled(snap) {
+            missingSnapshot = snap
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     func synthesize() async {
         guard let tts = ttsService else { return }
 
         isSynthesizing = true
+        canSaveVoice = false
         waveformSamples = []
         generatedChunks = []
         generatedSamples = []
@@ -115,6 +159,7 @@ final class VoiceDesignViewModel: ObservableObject {
             }
 
             hasAudio = !generatedChunks.isEmpty
+            canSaveVoice = hasAudio
 
             playbackContinuation?.finish()
             if let playbackTask {
@@ -132,6 +177,31 @@ final class VoiceDesignViewModel: ObservableObject {
         }
 
         isSynthesizing = false
+    }
+
+    /// Persist this designed voice (instruction-only) to the library so the
+    /// user can re-synthesize new text later with the same vocal style.
+    func saveVoice(name: String) async {
+        guard let storage = voiceStorage else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let voice = Voice(
+            id: UUID(),
+            name: trimmed,
+            type: .custom,
+            language: language,
+            createdAt: Date(),
+            instruction: instruction,
+            referenceAudioURL: nil,
+            embeddingData: nil
+        )
+        do {
+            try await storage.saveVoice(voice)
+            canSaveVoice = false
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     func togglePlayback() {

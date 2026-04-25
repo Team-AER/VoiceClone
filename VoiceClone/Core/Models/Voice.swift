@@ -5,9 +5,9 @@
 
 import Foundation
 
-struct Voice: Identifiable, Codable, Sendable {
+struct Voice: Identifiable, Codable, Sendable, Hashable {
 
-    enum VoiceType: String, Codable, Sendable {
+    enum VoiceType: String, Codable, Sendable, Hashable {
         case preset
         case custom
         case cloned

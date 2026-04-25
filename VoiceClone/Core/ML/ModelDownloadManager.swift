@@ -2,76 +2,35 @@
 //  ModelDownloadManager.swift
 //  VoiceClone
 //
-//  Downloads pre-converted MLX weights from HuggingFace at first launch.
-//  The target layout matches what the vendored Qwen3TTS package expects:
-//  a single model directory with `config.json`, `*.safetensors`, tokenizer
-//  files, and a `speech_tokenizer/` subdirectory.
+//  Downloads pre-converted MLX weights from HuggingFace at first launch and
+//  on demand thereafter. The required snapshot (CustomVoice) gates the launch
+//  screen; Base and VoiceDesign are opt-in downloads from the Model Manager.
 //
 
 import Foundation
 
-// MARK: - Model manifest
+// MARK: - Per-snapshot state
 
-private struct ModelFile {
-    /// Path inside the managed model dir (relative).
-    let relativePath: String
-    /// Remote URL to fetch from.
-    let downloadURL: String
-    /// Expected byte count (for progress UI; approximate is fine).
-    let expectedBytes: Int64
+enum SnapshotInstallState: Equatable {
+    case absent
+    case checking
+    case downloading(progress: Double, currentFile: String)
+    case installed
+    case failed(String)
+
+    var isInstalled: Bool {
+        if case .installed = self { return true }
+        return false
+    }
+
+    var isDownloading: Bool {
+        if case .downloading = self { return true }
+        return false
+    }
 }
 
-/// `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16` — a pre-converted MLX
-/// snapshot that loads directly with `Qwen3TTSModel.fromPretrained`.
-private let kModelRoot = "Qwen3TTS-CustomVoice-bf16"
-
-private let kModelManifest: [ModelFile] = [
-    ModelFile(relativePath: "config.json",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/config.json",
-              expectedBytes: 5_853),
-    ModelFile(relativePath: "generation_config.json",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/generation_config.json",
-              expectedBytes: 245),
-    ModelFile(relativePath: "preprocessor_config.json",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/preprocessor_config.json",
-              expectedBytes: 127),
-    ModelFile(relativePath: "model.safetensors",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/model.safetensors",
-              expectedBytes: 1_811_626_550),
-    ModelFile(relativePath: "model.safetensors.index.json",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/model.safetensors.index.json",
-              expectedBytes: 32_289),
-    ModelFile(relativePath: "tokenizer_config.json",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/tokenizer_config.json",
-              expectedBytes: 7_344),
-    // `tokenizer.json` is not in the CustomVoice snapshot but swift-transformers'
-    // AutoTokenizer requires it. Qwen3-TTS reuses the Qwen3 LLM tokenizer, so we
-    // fetch it from `Qwen/Qwen3-0.6B` — same vocab (151643) and merges (151387).
-    ModelFile(relativePath: "tokenizer.json",
-              downloadURL: "https://huggingface.co/Qwen/Qwen3-0.6B/resolve/main/tokenizer.json",
-              expectedBytes: 11_422_654),
-    ModelFile(relativePath: "vocab.json",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/vocab.json",
-              expectedBytes: 2_776_833),
-    ModelFile(relativePath: "merges.txt",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/merges.txt",
-              expectedBytes: 1_671_839),
-    ModelFile(relativePath: "speech_tokenizer/config.json",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/speech_tokenizer/config.json",
-              expectedBytes: 2_336),
-    ModelFile(relativePath: "speech_tokenizer/configuration.json",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/speech_tokenizer/configuration.json",
-              expectedBytes: 76),
-    ModelFile(relativePath: "speech_tokenizer/preprocessor_config.json",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/speech_tokenizer/preprocessor_config.json",
-              expectedBytes: 234),
-    ModelFile(relativePath: "speech_tokenizer/model.safetensors",
-              downloadURL: "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16/resolve/main/speech_tokenizer/model.safetensors",
-              expectedBytes: 682_293_092),
-]
-
-// MARK: - Download state
-
+/// Gate state for the launch screen. Mirrors the required snapshot state but
+/// keeps the existing API names stable for `RootView` / `ModelDownloadView`.
 enum ModelDownloadState: Equatable {
     case checking
     case awaitingPermission
@@ -79,17 +38,10 @@ enum ModelDownloadState: Equatable {
     case downloading(file: String, progress: Double, overallProgress: Double)
     case failed(String)
 
-    static func == (lhs: ModelDownloadState, rhs: ModelDownloadState) -> Bool {
-        switch (lhs, rhs) {
-        case (.checking, .checking), (.ready, .ready), (.awaitingPermission, .awaitingPermission): return true
-        case (.downloading(let lf, let lp, let lo), .downloading(let rf, let rp, let ro)):
-            return lf == rf && lp == rp && lo == ro
-        case (.failed(let l), .failed(let r)): return l == r
-        default: return false
-        }
+    var isReady: Bool {
+        if case .ready = self { return true }
+        return false
     }
-
-    var isReady: Bool { self == .ready }
 }
 
 // MARK: - Manager
@@ -97,38 +49,89 @@ enum ModelDownloadState: Equatable {
 @MainActor
 final class ModelDownloadManager: NSObject, ObservableObject {
 
+    /// Gate state — only reflects the required (CustomVoice) snapshot.
     @Published private(set) var state: ModelDownloadState = .checking
 
+    /// Per-snapshot install state — used by the Model Manager UI for
+    /// optional downloads (Base, VoiceDesign).
+    @Published private(set) var snapshotStates: [ModelSnapshot: SnapshotInstallState] = [:]
+
     private var urlSession: URLSession?
-    private var activeTasks: [URLSessionDownloadTask] = []
-    private var pendingFiles: [ModelFile] = []
-    private var completedCount = 0
+    /// Maps a URLSessionDownloadTask back to the (snapshot, file) it was
+    /// fetching. Tasks are dispatched from background queues so we keep this
+    /// keyed by `taskIdentifier`, which is stable for the lifetime of the task.
+    private var taskRegistry: [Int: (snapshot: ModelSnapshot, file: ModelFile)] = [:]
+    /// Per-snapshot pending file count + completed count, for progress UI.
+    private var pendingBySnapshot: [ModelSnapshot: (pending: [ModelFile], completed: Int)] = [:]
 
     override init() {
         super.init()
-        Task { await checkAndDownloadIfNeeded() }
+        // Lazy URLSession with a background-tolerant timeout.
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForResource = 3600
+        urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+
+        // Initial scan: see what's already on disk.
+        for snap in ModelSnapshot.allCases {
+            snapshotStates[snap] = Self.isInstalled(snap) ? .installed : .absent
+        }
+        refreshGateState()
     }
 
-    // MARK: - Public
+    // MARK: - Public — gate snapshot
 
+    /// Trigger a download of the required snapshot (called from the launch UI).
     func startDownload() {
-        let missing = kModelManifest.filter { !fileIsValid($0) }
-        guard !missing.isEmpty else {
-            state = .ready
-            return
-        }
-        downloadFiles(missing)
+        startDownload(of: .customVoice)
     }
 
     func retry() {
-        clearCorruptFiles()
+        clearCorruptFiles(for: .customVoice)
         startDownload()
     }
 
-    // MARK: - Paths
+    // MARK: - Public — any snapshot
 
-    /// Root directory that holds all managed TTS model files.
-    /// nonisolated so delegate callbacks on background queues can use it.
+    /// Begin downloading the given snapshot if not already installed.
+    func startDownload(of snapshot: ModelSnapshot) {
+        if Self.isInstalled(snapshot) {
+            snapshotStates[snapshot] = .installed
+            refreshGateState()
+            return
+        }
+        clearCorruptFiles(for: snapshot)
+        let missing = snapshot.manifest.filter { !fileIsValid($0, in: snapshot) }
+        guard !missing.isEmpty else {
+            snapshotStates[snapshot] = .installed
+            refreshGateState()
+            return
+        }
+        pendingBySnapshot[snapshot] = (missing, 0)
+        snapshotStates[snapshot] = .downloading(progress: 0, currentFile: missing.first?.relativePath ?? "")
+        refreshGateState()
+
+        guard let session = urlSession else { return }
+        for file in missing {
+            guard let url = URL(string: file.downloadURL) else { continue }
+            let task = session.downloadTask(with: url)
+            taskRegistry[task.taskIdentifier] = (snapshot, file)
+            task.resume()
+        }
+    }
+
+    /// Best-effort: re-scan disk and update snapshot states. Cheap.
+    func rescan() {
+        for snap in ModelSnapshot.allCases {
+            // Don't clobber a download in progress.
+            if case .downloading = snapshotStates[snap] { continue }
+            snapshotStates[snap] = Self.isInstalled(snap) ? .installed : .absent
+        }
+        refreshGateState()
+    }
+
+    // MARK: - Static query
+
+    /// Root directory holding all snapshot subdirectories.
     nonisolated static var modelsDirectory: URL {
         #if os(macOS)
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -139,40 +142,46 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         #endif
     }
 
-    /// Directory containing the single Qwen3-TTS model that the app uses.
-    /// This is the path passed to `Qwen3TTSModel.fromPretrained`.
-    nonisolated static var currentModelDirectory: URL {
-        modelsDirectory.appendingPathComponent(kModelRoot, isDirectory: true)
+    /// Absolute path to a specific snapshot's directory.
+    nonisolated static func directory(for snapshot: ModelSnapshot) -> URL {
+        modelsDirectory.appendingPathComponent(snapshot.rawValue, isDirectory: true)
     }
 
-    /// `true` when every file required to run TTS is on disk.
-    nonisolated static func areModelsAvailable() -> Bool {
+    /// Required-snapshot directory. Kept as a non-deprecated alias so call
+    /// sites that don't care about variant selection (the launch gate, the
+    /// E2E test) still work.
+    nonisolated static var currentModelDirectory: URL {
+        directory(for: .customVoice)
+    }
+
+    /// `true` when every file required to run the given snapshot is on disk
+    /// AND passes the basic content sniff.
+    nonisolated static func isInstalled(_ snapshot: ModelSnapshot) -> Bool {
         let fm = FileManager.default
-        for file in kModelManifest {
-            let url = currentModelDirectory.appendingPathComponent(file.relativePath)
+        let dir = directory(for: snapshot)
+        for file in snapshot.manifest {
+            let url = dir.appendingPathComponent(file.relativePath)
             guard fm.fileExists(atPath: url.path) else { return false }
+            guard contentIsValid(at: url) else { return false }
         }
         return true
     }
 
-    // MARK: - Check
-
-    private func checkAndDownloadIfNeeded() async {
-        state = .checking
-        let missing = kModelManifest.filter { !fileIsValid($0) }
-        state = missing.isEmpty ? .ready : .awaitingPermission
+    /// Backward-compat for the E2E test — true when the required (CustomVoice)
+    /// snapshot is installed.
+    nonisolated static func areModelsAvailable() -> Bool {
+        isInstalled(.customVoice)
     }
 
-    /// A file is valid when it's on disk in the managed dir and passes a basic
-    /// content sniff. We intentionally don't trust `expectedBytes` for equality
-    /// because HF occasionally repacks files.
-    private func fileIsValid(_ file: ModelFile) -> Bool {
-        let url = Self.currentModelDirectory.appendingPathComponent(file.relativePath)
+    // MARK: - File validity
+
+    private func fileIsValid(_ file: ModelFile, in snapshot: ModelSnapshot) -> Bool {
+        let url = Self.directory(for: snapshot).appendingPathComponent(file.relativePath)
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
-        return contentIsValid(at: url)
+        return Self.contentIsValid(at: url)
     }
 
-    private func contentIsValid(at url: URL) -> Bool {
+    nonisolated private static func contentIsValid(at url: URL) -> Bool {
         switch url.pathExtension {
         case "json":
             guard let data = try? Data(contentsOf: url),
@@ -187,9 +196,7 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         }
     }
 
-    /// Reads the 8-byte safetensors header prefix and checks the claimed JSON
-    /// metadata length is in a sane range.
-    private func safetensorsHeaderIsValid(at url: URL) -> Bool {
+    nonisolated private static func safetensorsHeaderIsValid(at url: URL) -> Bool {
         guard let fh = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? fh.close() }
         let prefix = fh.readData(ofLength: 8)
@@ -198,36 +205,38 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         return headerLen > 0 && headerLen < 100_000_000
     }
 
-    // MARK: - Corrupt file cleanup
-
-    private func clearCorruptFiles() {
+    private func clearCorruptFiles(for snapshot: ModelSnapshot) {
         let fm = FileManager.default
-        for file in kModelManifest {
-            let url = Self.currentModelDirectory.appendingPathComponent(file.relativePath)
+        let dir = Self.directory(for: snapshot)
+        for file in snapshot.manifest {
+            let url = dir.appendingPathComponent(file.relativePath)
             guard fm.fileExists(atPath: url.path) else { continue }
-            if !contentIsValid(at: url) {
+            if !Self.contentIsValid(at: url) {
                 try? fm.removeItem(at: url)
-                print("⚠️ Removed corrupt cached file: \(file.relativePath)")
+                print("⚠️ Removed corrupt cached file: \(snapshot.rawValue)/\(file.relativePath)")
             }
         }
     }
 
-    // MARK: - Download
+    // MARK: - Gate state plumbing
 
-    private func downloadFiles(_ files: [ModelFile]) {
-        pendingFiles = files
-        completedCount = 0
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForResource = 3600
-        urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
-
-        for file in files {
-            guard let url = URL(string: file.downloadURL) else { continue }
-            let task = urlSession!.downloadTask(with: url)
-            task.taskDescription = file.relativePath
-            activeTasks.append(task)
-            task.resume()
+    /// Recompute the launch-screen `state` from the required snapshot's state.
+    private func refreshGateState() {
+        guard let required = snapshotStates[.customVoice] else {
+            state = .checking
+            return
+        }
+        switch required {
+        case .absent:
+            state = .awaitingPermission
+        case .checking:
+            state = .checking
+        case .downloading(let progress, let currentFile):
+            state = .downloading(file: currentFile, progress: progress, overallProgress: progress)
+        case .installed:
+            state = .ready
+        case .failed(let msg):
+            state = .failed(msg)
         }
     }
 }
@@ -241,20 +250,31 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
+        let taskId = downloadTask.taskIdentifier
+        // The temp file at `location` will be deleted as soon as this delegate
+        // returns, so move it synchronously here. We also need to know which
+        // (snapshot, file) this task corresponds to, which lives on @MainActor.
+        // Read the registry off the main actor by hopping briefly.
+        let mappingResult: (snapshot: ModelSnapshot, file: ModelFile)? = MainActor.assumeIsolated {
+            self.taskRegistry[taskId]
+        }
+        guard let mapping = mappingResult else { return }
+
+        // HTTP error → record failure.
         if let httpResponse = downloadTask.response as? HTTPURLResponse,
            httpResponse.statusCode != 200 {
             let code = httpResponse.statusCode
-            let path = downloadTask.taskDescription ?? "unknown"
+            let path = mapping.file.relativePath
             Task { @MainActor in
-                self.state = .failed("Server returned HTTP \(code) for \(path)")
+                self.failSnapshot(mapping.snapshot,
+                                  reason: "Server returned HTTP \(code) for \(path)")
             }
             return
         }
 
-        guard let relativePath = downloadTask.taskDescription else { return }
-        let destination = ModelDownloadManager.currentModelDirectory.appendingPathComponent(relativePath)
+        let dir = ModelDownloadManager.directory(for: mapping.snapshot)
+        let destination = dir.appendingPathComponent(mapping.file.relativePath)
 
-        // Must move synchronously — URLSession deletes the temp file when this returns.
         do {
             try FileManager.default.createDirectory(
                 at: destination.deletingLastPathComponent(),
@@ -267,32 +287,29 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
         } catch {
             let message = error.localizedDescription
             Task { @MainActor in
-                self.state = .failed("Failed to save \(relativePath): \(message)")
+                self.failSnapshot(mapping.snapshot,
+                                  reason: "Failed to save \(mapping.file.relativePath): \(message)")
             }
             return
         }
 
         // Reject HTML error pages masquerading as JSON.
         if destination.pathExtension == "json" {
-            if let data = try? Data(contentsOf: destination),
-               (try? JSONSerialization.jsonObject(with: data)) != nil {
-                // Valid JSON.
-            } else {
+            let isValid = (try? Data(contentsOf: destination))
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) } != nil
+            if !isValid {
                 try? FileManager.default.removeItem(at: destination)
                 Task { @MainActor in
-                    self.state = .failed(
-                        "Downloaded \(relativePath) is not valid JSON — the server may have returned an error page."
-                    )
+                    self.failSnapshot(mapping.snapshot,
+                                      reason: "Downloaded \(mapping.file.relativePath) is not valid JSON — server may have returned an error page.")
                 }
                 return
             }
         }
 
         Task { @MainActor in
-            self.completedCount += 1
-            if self.completedCount == self.pendingFiles.count {
-                self.state = .ready
-            }
+            self.taskRegistry.removeValue(forKey: taskId)
+            self.markFileComplete(snapshot: mapping.snapshot)
         }
     }
 
@@ -303,14 +320,15 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
     ) {
+        let taskId = downloadTask.taskIdentifier
         let fileProgress = totalBytesExpectedToWrite > 0
             ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
             : 0
-        let fileName = downloadTask.taskDescription ?? ""
-
         Task { @MainActor in
-            let overall = (Double(self.completedCount) + fileProgress) / Double(self.pendingFiles.count)
-            self.state = .downloading(file: fileName, progress: fileProgress, overallProgress: overall)
+            guard let mapping = self.taskRegistry[taskId] else { return }
+            self.publishProgress(snapshot: mapping.snapshot,
+                                 currentFile: mapping.file.relativePath,
+                                 currentFileProgress: fileProgress)
         }
     }
 
@@ -320,8 +338,60 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
         didCompleteWithError error: Error?
     ) {
         guard let error else { return }
+        let taskId = task.taskIdentifier
+        let message = error.localizedDescription
         Task { @MainActor in
-            self.state = .failed(error.localizedDescription)
+            guard let mapping = self.taskRegistry[taskId] else { return }
+            self.failSnapshot(mapping.snapshot, reason: message)
         }
+    }
+
+    // MARK: - State transitions (main-actor)
+
+    private func failSnapshot(_ snapshot: ModelSnapshot, reason: String) {
+        snapshotStates[snapshot] = .failed(reason)
+        pendingBySnapshot.removeValue(forKey: snapshot)
+        // Cancel any sibling tasks for this snapshot.
+        for (id, mapping) in taskRegistry where mapping.snapshot == snapshot {
+            urlSession?.getAllTasks { tasks in
+                for t in tasks where t.taskIdentifier == id {
+                    t.cancel()
+                }
+            }
+        }
+        taskRegistry = taskRegistry.filter { $0.value.snapshot != snapshot }
+        refreshGateState()
+    }
+
+    private func markFileComplete(snapshot: ModelSnapshot) {
+        guard var entry = pendingBySnapshot[snapshot] else { return }
+        entry.completed += 1
+        pendingBySnapshot[snapshot] = entry
+
+        let total = entry.pending.count
+        if entry.completed >= total {
+            pendingBySnapshot.removeValue(forKey: snapshot)
+            // Final verification: a corrupt file would still mean "absent."
+            if Self.isInstalled(snapshot) {
+                snapshotStates[snapshot] = .installed
+            } else {
+                snapshotStates[snapshot] = .failed("Some files failed verification after download.")
+            }
+        } else {
+            let progress = Double(entry.completed) / Double(max(total, 1))
+            let currentFile = entry.pending[min(entry.completed, total - 1)].relativePath
+            snapshotStates[snapshot] = .downloading(progress: progress, currentFile: currentFile)
+        }
+        refreshGateState()
+    }
+
+    private func publishProgress(snapshot: ModelSnapshot,
+                                 currentFile: String,
+                                 currentFileProgress: Double) {
+        guard let entry = pendingBySnapshot[snapshot] else { return }
+        let total = entry.pending.count
+        let overall = (Double(entry.completed) + currentFileProgress) / Double(max(total, 1))
+        snapshotStates[snapshot] = .downloading(progress: overall, currentFile: currentFile)
+        refreshGateState()
     }
 }

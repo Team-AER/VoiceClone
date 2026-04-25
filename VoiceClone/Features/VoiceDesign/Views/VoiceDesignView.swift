@@ -9,28 +9,81 @@ struct VoiceDesignView: View {
 
     @StateObject private var viewModel = VoiceDesignViewModel()
     @EnvironmentObject var container: DIContainer
+    @EnvironmentObject var downloadManager: ModelDownloadManager
+
+    @State private var showingModelManager = false
+    @State private var showingSaveSheet = false
+    @State private var saveVoiceName = ""
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                textEditor
-                instructionEditor
-                languageSelector
-                waveformDisplay
-                controlButtons
-                synthesizeButton
+            Group {
+                if let missing = viewModel.missingSnapshot {
+                    VStack {
+                        Spacer()
+                        MissingSnapshotPrompt(snapshot: missing) {
+                            showingModelManager = true
+                        }
+                        Spacer()
+                    }
+                    .padding()
+                } else {
+                    designForm
+                }
             }
-            .padding()
             .navigationTitle("Design")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showingModelManager = true
+                    } label: {
+                        Image(systemName: "icloud.and.arrow.down")
+                    }
+                    .help("Manage models")
+                }
+            }
             .task {
-                await viewModel.setup(ttsService: container.ttsService, audioEngine: container.audioEngine)
+                await viewModel.setup(
+                    ttsService: container.ttsService,
+                    audioEngine: container.audioEngine,
+                    voiceStorage: container.voiceStorage,
+                    downloadManager: downloadManager
+                )
             }
             .alert("Error", isPresented: errorBinding) {
                 Button("OK") { viewModel.clearError() }
             } message: {
                 Text(viewModel.error ?? "")
             }
+            .sheet(isPresented: $showingModelManager, onDismiss: viewModel.retrySetup) {
+                ModelManagerView(highlight: .voiceDesign)
+                    .environmentObject(downloadManager)
+            }
+            .sheet(isPresented: $showingSaveSheet) {
+                SaveVoiceSheet(
+                    title: "Save designed voice",
+                    placeholder: "e.g. Calm narrator",
+                    name: $saveVoiceName
+                ) {
+                    let n = saveVoiceName
+                    showingSaveSheet = false
+                    saveVoiceName = ""
+                    Task { await viewModel.saveVoice(name: n) }
+                }
+            }
         }
+    }
+
+    private var designForm: some View {
+        VStack(spacing: 20) {
+            textEditor
+            instructionEditor
+            languageSelector
+            waveformDisplay
+            controlButtons
+            synthesizeButton
+        }
+        .padding()
     }
 
     private var errorBinding: Binding<Bool> {
@@ -58,7 +111,7 @@ struct VoiceDesignView: View {
 
     private var instructionEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Voice instruction")
+            Text("Voice description")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -67,6 +120,10 @@ struct VoiceDesignView: View {
                 .padding(8)
                 .background(.quaternary)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            Text("Example: \"A warm female voice with a friendly tone\"")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -102,6 +159,13 @@ struct VoiceDesignView: View {
                     .font(.title2)
             }
             .disabled(!viewModel.hasAudio)
+
+            Button {
+                showingSaveSheet = true
+            } label: {
+                Label("Save Voice", systemImage: "square.and.arrow.down.on.square")
+            }
+            .disabled(!viewModel.canSaveVoice)
 
             Spacer()
 
@@ -151,4 +215,5 @@ struct VoiceDesignView: View {
 #Preview {
     VoiceDesignView()
         .environmentObject(DIContainer())
+        .environmentObject(ModelDownloadManager())
 }

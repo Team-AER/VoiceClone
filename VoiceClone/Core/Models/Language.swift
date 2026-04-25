@@ -5,7 +5,7 @@
 
 import Foundation
 
-enum Language: String, CaseIterable, Codable, Sendable {
+enum Language: String, CaseIterable, Codable, Sendable, Hashable {
     case english = "English"
     case chinese = "Chinese"
     case japanese = "Japanese"

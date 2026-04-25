@@ -25,9 +25,18 @@ final class VoiceCloneViewModel: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var exportURL: URL?
 
+    /// When non-nil, the Base snapshot is missing. The view should render
+    /// `MissingSnapshotPrompt(snapshot:)` instead of the cloning UI.
+    @Published private(set) var missingSnapshot: ModelSnapshot?
+
+    /// Set after a successful clone synthesis so the view can show "Save voice".
+    @Published private(set) var canSaveVoice = false
+
     private let recorder = AudioRecorder()
     private var ttsService: MLXTTSService?
     private var audioEngine: AudioEngine?
+    private var voiceStorage: VoiceStorage?
+    private weak var downloadManager: ModelDownloadManager?
     private var referenceAudioURL: URL?
     private var referenceAudioData: Data?
     private var generatedChunks: [AudioChunk] = []
@@ -35,6 +44,7 @@ final class VoiceCloneViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     var canSynthesize: Bool {
+        missingSnapshot == nil &&
         !targetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !referenceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         hasReferenceAudio &&
@@ -42,15 +52,16 @@ final class VoiceCloneViewModel: ObservableObject {
         ttsService?.state == .ready
     }
 
-    func setup(ttsService: MLXTTSService, audioEngine: AudioEngine) async {
+    func setup(ttsService: MLXTTSService,
+               audioEngine: AudioEngine,
+               voiceStorage: VoiceStorage,
+               downloadManager: ModelDownloadManager) async {
         self.ttsService = ttsService
         self.audioEngine = audioEngine
+        self.voiceStorage = voiceStorage
+        self.downloadManager = downloadManager
 
-        do {
-            try await ttsService.loadCapability(.voiceClone)
-        } catch {
-            self.error = error.localizedDescription
-        }
+        await loadCapability()
 
         recorder.$isRecording
             .receive(on: DispatchQueue.main)
@@ -91,6 +102,34 @@ final class VoiceCloneViewModel: ObservableObject {
                 self?.playbackProgress = min(1, max(0, current / duration))
             }
             .store(in: &cancellables)
+
+        downloadManager.$snapshotStates
+            .map { $0[ModelSnapshot.base] }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self else { return }
+                if case .installed = state, self.missingSnapshot != nil {
+                    Task { await self.loadCapability() }
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    func retrySetup() {
+        Task { await loadCapability() }
+    }
+
+    private func loadCapability() async {
+        guard let tts = ttsService else { return }
+        do {
+            try await tts.loadCapability(.voiceClone)
+            missingSnapshot = nil
+        } catch let TTSError.snapshotNotInstalled(snap) {
+            missingSnapshot = snap
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     func toggleRecording() {
@@ -119,6 +158,7 @@ final class VoiceCloneViewModel: ObservableObject {
         guard let tts = ttsService, let audioData = referenceAudioData else { return }
 
         isSynthesizing = true
+        canSaveVoice = false
         generatedChunks = []
         generatedSamples = []
         waveformSamples = []
@@ -149,6 +189,8 @@ final class VoiceCloneViewModel: ObservableObject {
                 playbackContinuation?.yield(chunk)
             }
 
+            canSaveVoice = !generatedChunks.isEmpty
+
             playbackContinuation?.finish()
             if let playbackTask {
                 do {
@@ -164,6 +206,36 @@ final class VoiceCloneViewModel: ObservableObject {
         }
 
         isSynthesizing = false
+    }
+
+    /// Persist this clone (reference audio + transcript) to the library so the
+    /// user can re-synthesize new text later in the same voice.
+    /// VoiceStorage copies the recording to its managed `Voices/` directory.
+    func saveVoice(name: String) async {
+        guard let storage = voiceStorage,
+              let refURL = referenceAudioURL else {
+            self.error = "Reference recording is no longer available."
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let voice = Voice(
+            id: UUID(),
+            name: trimmed,
+            type: .cloned,
+            language: language,
+            createdAt: Date(),
+            instruction: referenceText,   // reused as the reference transcript
+            referenceAudioURL: refURL,
+            embeddingData: nil
+        )
+        do {
+            try await storage.saveVoice(voice)
+            canSaveVoice = false
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     func togglePlayback() {

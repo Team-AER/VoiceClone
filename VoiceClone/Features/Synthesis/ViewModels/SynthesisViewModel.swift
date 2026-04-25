@@ -6,13 +6,50 @@
 import Combine
 import Foundation
 
+/// One pickable item in the Speak tab's voice selector. Wraps either a
+/// built-in preset or a user-saved Voice from the library.
+enum VoiceOption: Identifiable, Hashable {
+    case preset(PresetVoice)
+    case saved(Voice)
+
+    var id: String {
+        switch self {
+        case .preset(let p): return "preset:\(p.rawValue)"
+        case .saved(let v):  return "saved:\(v.id.uuidString)"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .preset(let p): return p.rawValue
+        case .saved(let v):  return v.name
+        }
+    }
+
+    /// The TTS capability needed to synthesize this option.
+    var requiredCapability: TTSCapability {
+        switch self {
+        case .preset:
+            return .customVoice
+        case .saved(let v):
+            switch v.type {
+            case .preset, .custom: return .voiceDesign
+            case .cloned:          return .voiceClone
+            }
+        }
+    }
+}
+
 @MainActor
 final class SynthesisViewModel: ObservableObject {
 
     @Published var text: String = ""
     @Published var language: Language = .english
-    @Published var selectedVoice: PresetVoice = .ryan
     @Published var instruction: String = ""
+
+    /// All pickable voices: built-in presets + saved custom/cloned voices.
+    @Published private(set) var voiceOptions: [VoiceOption] = PresetVoice.allCases.map { .preset($0) }
+    @Published var selectedOption: VoiceOption = .preset(.ryan)
 
     @Published private(set) var isSynthesizing = false
     @Published private(set) var isPlaying = false
@@ -22,27 +59,35 @@ final class SynthesisViewModel: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var exportURL: URL?
 
+    /// When non-nil, the selected option needs a snapshot we don't have yet.
+    @Published private(set) var missingSnapshot: ModelSnapshot?
+
     private var ttsService: MLXTTSService?
     private var audioEngine: AudioEngine?
+    private var voiceStorage: VoiceStorage?
+    private weak var downloadManager: ModelDownloadManager?
     private var generatedChunks: [AudioChunk] = []
     private var generatedSamples: [Float] = []
     private var cancellables = Set<AnyCancellable>()
 
     var canSynthesize: Bool {
+        missingSnapshot == nil &&
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !isSynthesizing &&
         ttsService?.state == .ready
     }
 
-    func setup(ttsService: MLXTTSService, audioEngine: AudioEngine) async {
+    func setup(ttsService: MLXTTSService,
+               audioEngine: AudioEngine,
+               voiceStorage: VoiceStorage,
+               downloadManager: ModelDownloadManager) async {
         self.ttsService = ttsService
         self.audioEngine = audioEngine
+        self.voiceStorage = voiceStorage
+        self.downloadManager = downloadManager
 
-        do {
-            try await ttsService.loadCapability(.customVoice)
-        } catch {
-            self.error = error.localizedDescription
-        }
+        await reloadVoiceOptions()
+        await loadCapabilityForSelection()
 
         ttsService.$state
             .receive(on: DispatchQueue.main)
@@ -79,6 +124,64 @@ final class SynthesisViewModel: ObservableObject {
                 self?.playbackProgress = min(1, max(0, current / duration))
             }
             .store(in: &cancellables)
+
+        // Re-attempt capability load whenever a snapshot finishes downloading.
+        downloadManager.$snapshotStates
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                if self.missingSnapshot != nil {
+                    Task { await self.loadCapabilityForSelection() }
+                }
+            }
+            .store(in: &cancellables)
+
+        // Hot-swap the model when the user picks a different voice.
+        $selectedOption
+            .removeDuplicates()
+            .dropFirst()  // initial value handled by setup
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                Task { await self.loadCapabilityForSelection() }
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Refresh the voice picker — call after the Library tab adds/removes a
+    /// voice, or after the Design/Clone tabs save a new one.
+    func reloadVoiceOptions() async {
+        guard let storage = voiceStorage else { return }
+        do {
+            let saved = try await storage.fetchVoices()
+            var opts: [VoiceOption] = PresetVoice.allCases.map { .preset($0) }
+            opts.append(contentsOf: saved.map { .saved($0) })
+            self.voiceOptions = opts
+            // If the currently selected saved voice was deleted, fall back.
+            if !opts.contains(selectedOption) {
+                selectedOption = .preset(.ryan)
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func retrySetup() {
+        Task { await loadCapabilityForSelection() }
+    }
+
+    private func loadCapabilityForSelection() async {
+        guard let tts = ttsService else { return }
+        let needed = selectedOption.requiredCapability
+        do {
+            try await tts.loadCapability(needed)
+            missingSnapshot = nil
+        } catch let TTSError.snapshotNotInstalled(snap) {
+            missingSnapshot = snap
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     func synthesize() async {
@@ -101,12 +204,7 @@ final class SynthesisViewModel: ObservableObject {
                 try await tts.playStream(playbackStream)
             }
 
-            let stream = try await tts.synthesize(
-                text: text,
-                language: language,
-                speaker: selectedVoice,
-                instruction: instruction.isEmpty ? nil : instruction
-            )
+            let stream = try await openSynthesisStream(tts: tts)
 
             for try await chunk in stream {
                 generatedChunks.append(chunk)
@@ -135,6 +233,46 @@ final class SynthesisViewModel: ObservableObject {
         isSynthesizing = false
     }
 
+    /// Pick the right `synthesize(...)` overload based on the selected option.
+    /// Saved cloned voices need to load their reference audio off disk first.
+    private func openSynthesisStream(tts: MLXTTSService) async throws -> AsyncThrowingStream<AudioChunk, Error> {
+        switch selectedOption {
+        case .preset(let preset):
+            return try await tts.synthesize(
+                text: text,
+                language: language,
+                speaker: preset,
+                instruction: instruction.isEmpty ? nil : instruction
+            )
+
+        case .saved(let voice):
+            switch voice.type {
+            case .preset, .custom:
+                // Designed (instruction-only) voice — instruction stored on `voice.instruction`.
+                let style = (voice.instruction ?? instruction)
+                return try await tts.synthesize(
+                    text: text,
+                    language: language,
+                    instruction: style
+                )
+
+            case .cloned:
+                guard let storage = voiceStorage,
+                      let refData = try await storage.referenceAudioData(for: voice.id) else {
+                    throw TTSError.invalidReferenceAudio(
+                        "Saved voice \"\(voice.name)\" is missing its reference recording."
+                    )
+                }
+                return try await tts.synthesize(
+                    text: text,
+                    language: language,
+                    referenceAudio: refData,
+                    referenceText: voice.instruction ?? ""
+                )
+            }
+        }
+    }
+
     func togglePlayback() {
         guard let engine = audioEngine else { return }
         if isPlaying {
@@ -158,7 +296,7 @@ final class SynthesisViewModel: ObservableObject {
             return
         }
 
-        let seekAmount: TimeInterval = 5.0 // 5 seconds
+        let seekAmount: TimeInterval = 5.0
         let totalDuration = Double(generatedSamples.count) / 24000.0
         let newTime = min(engine.currentTime + seekAmount, totalDuration)
 
@@ -181,7 +319,7 @@ final class SynthesisViewModel: ObservableObject {
             return
         }
 
-        let seekAmount: TimeInterval = 5.0 // 5 seconds
+        let seekAmount: TimeInterval = 5.0
         let totalDuration = Double(generatedSamples.count) / 24000.0
         let newTime = max(engine.currentTime - seekAmount, 0)
 

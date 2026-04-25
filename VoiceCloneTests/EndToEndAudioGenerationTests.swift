@@ -2,13 +2,15 @@
 //  EndToEndAudioGenerationTests.swift
 //  VoiceCloneTests
 //
-//  Drives MLXTTSService through the real vendored Qwen3TTSModel and asserts
-//  that the produced audio is non-empty, finite, and has non-zero energy.
+//  Drives MLXTTSService through the real vendored Qwen3TTSModel for each
+//  installed snapshot. Tests skip gracefully when a particular snapshot is
+//  not present so CI works against any subset of downloaded models.
 //
-//  Skips gracefully when model files are absent — use
-//  `ModelDownloadManager` once (launch the app) or pre-populate
-//  `~/Library/Application Support/VoiceClone/MLXModels/Qwen3TTS-CustomVoice-bf16/`
-//  before running.
+//  Snapshot install hint:
+//    ~/Library/Application Support/VoiceClone/MLXModels/
+//      Qwen3TTS-CustomVoice-bf16/   (required for Speak tab)
+//      Qwen3TTS-Base-bf16/          (required for Clone tab)
+//      Qwen3TTS-VoiceDesign-bf16/   (required for Design tab)
 //
 
 import XCTest
@@ -34,14 +36,15 @@ final class EndToEndAudioGenerationTests: XCTestCase {
         try await super.tearDown()
     }
 
-    // MARK: - Tests
+    // MARK: - Preset (CustomVoice) snapshot
 
-    /// Preset-voice synthesis end-to-end.
+    /// Preset-voice synthesis end-to-end against the CustomVoice snapshot.
     func testEndToEndCustomVoice() async throws {
-        try skipUnlessModelsAvailable()
+        try skipUnlessInstalled(.customVoice)
 
         try await service.loadCapability(.customVoice)
         XCTAssertEqual(service.state, .ready)
+        XCTAssertEqual(service.loadedSnapshot, .customVoice)
 
         let stream = try await service.synthesize(
             text: "The quick brown fox jumps over the lazy dog.",
@@ -52,54 +55,78 @@ final class EndToEndAudioGenerationTests: XCTestCase {
         assertValidAudio(chunks: chunks, samples: samples, label: "customVoice(.ryan)")
     }
 
-    /// Voice-design (instruct-only) synthesis.
-    ///
-    /// Skipped when the installed model is a CustomVoice snapshot — that
-    /// variant doesn't support instruction-only generation. Install the
-    /// VoiceDesign snapshot (or run on a Base model) to exercise this path.
+    /// CustomVoice with an instruct overlay — same snapshot, but routes
+    /// through the model's emotion/style path.
+    func testCustomVoiceWithInstruct() async throws {
+        try skipUnlessInstalled(.customVoice)
+
+        try await service.loadCapability(.customVoice)
+        let stream = try await service.synthesize(
+            text: "Hello, this is a calm and warm sample.",
+            language: .english,
+            speaker: .ryan,
+            instruction: "Speak in a calm, warm tone."
+        )
+        let (chunks, samples) = try await collectAudio(from: stream)
+        assertValidAudio(chunks: chunks, samples: samples, label: "customVoice(.ryan)+instruct")
+    }
+
+    // MARK: - VoiceDesign snapshot
+
+    /// Pure description-driven synthesis — requires the VoiceDesign-1.7B snapshot.
     func testEndToEndVoiceDesign() async throws {
-        try skipUnlessModelsAvailable()
+        try skipUnlessInstalled(.voiceDesign)
 
         try await service.loadCapability(.voiceDesign)
+        XCTAssertEqual(service.loadedSnapshot, .voiceDesign)
 
-        let stream: AsyncThrowingStream<AudioChunk, Error>
-        do {
-            stream = try await service.synthesize(
-                text: "Hello, this is a voice design synthesis test.",
-                language: .english,
-                instruction: "Speak in a calm, clear voice."
-            )
-        } catch {
-            throw XCTSkip(
-                "Installed model does not support voice-design generation: " +
-                error.localizedDescription
-            )
-        }
-
-        do {
-            let (chunks, samples) = try await collectAudio(from: stream)
-            assertValidAudio(chunks: chunks, samples: samples, label: "voiceDesign")
-        } catch {
-            let msg = error.localizedDescription.lowercased()
-            // Any "wrong model variant" signal from the vendored Qwen3TTSModel:
-            // CustomVoice models reject instruct-only requests ("requires 'speaker'"),
-            // VoiceDesign models reject speaker-based requests ("requires 'instruct'").
-            let mismatchMarkers = ["voice_design", "instruct", "invalidinput",
-                                   "requires 'speaker'", "requires 'instruct'",
-                                   "custom_voice", "customvoice"]
-            if mismatchMarkers.contains(where: { msg.contains($0) }) {
-                throw XCTSkip(
-                    "Installed model does not support voice-design generation: " +
-                    error.localizedDescription
-                )
-            }
-            throw error
-        }
+        let stream = try await service.synthesize(
+            text: "Hello, this is a voice design synthesis test.",
+            language: .english,
+            instruction: "A warm female voice with a friendly tone."
+        )
+        let (chunks, samples) = try await collectAudio(from: stream)
+        assertValidAudio(chunks: chunks, samples: samples, label: "voiceDesign")
     }
+
+    // MARK: - Voice Clone (Base) snapshot
+
+    /// Voice cloning end-to-end. Synthesizes a short sample with the Base
+    /// snapshot's preset path and feeds it back as the reference, so the
+    /// test is hermetic — no microphone needed.
+    func testEndToEndVoiceClone() async throws {
+        try skipUnlessInstalled(.base)
+
+        // Step 1: produce a reference clip using the Base snapshot's preset path.
+        try await service.loadCapability(.customVoice)  // Base also covers .customVoice
+        let refStream = try await service.synthesize(
+            text: "This is a short reference recording for cloning.",
+            language: .english,
+            speaker: .ryan
+        )
+        let (_, refSamples) = try await collectAudio(from: refStream)
+        XCTAssertGreaterThan(refSamples.count, 24_000, "Reference clip too short")
+        let refData = try makeWav(samples: refSamples, sampleRate: 24_000)
+
+        // Step 2: clone from that reference.
+        try await service.loadCapability(.voiceClone)
+        XCTAssertEqual(service.loadedSnapshot, .base)
+
+        let stream = try await service.synthesize(
+            text: "Hello, this is my cloned voice speaking.",
+            language: .english,
+            referenceAudio: refData,
+            referenceText: "This is a short reference recording for cloning."
+        )
+        let (chunks, samples) = try await collectAudio(from: stream)
+        assertValidAudio(chunks: chunks, samples: samples, label: "voiceClone")
+    }
+
+    // MARK: - Common audio output asserts
 
     /// Chunks must have a 24 kHz sample rate, finite samples, and peaks in range.
     func testAudioOutputFormat() async throws {
-        try skipUnlessModelsAvailable()
+        try skipUnlessInstalled(.customVoice)
 
         try await service.loadCapability(.customVoice)
         let stream = try await service.synthesize(
@@ -118,13 +145,14 @@ final class EndToEndAudioGenerationTests: XCTestCase {
         }
     }
 
-    /// The service state machine: idle → loading → ready → synthesizing → ready.
+    /// idle → loading → ready → synthesizing → ready, plus capability flag.
     func testServiceStateTransitions() async throws {
-        try skipUnlessModelsAvailable()
+        try skipUnlessInstalled(.customVoice)
 
         XCTAssertEqual(service.state, .idle)
         try await service.loadCapability(.customVoice)
         XCTAssertEqual(service.state, .ready)
+        XCTAssertTrue(service.loadedCapabilities.contains(.customVoice))
 
         let stream = try await service.synthesize(
             text: "State transition test.",
@@ -135,13 +163,39 @@ final class EndToEndAudioGenerationTests: XCTestCase {
         XCTAssertEqual(service.state, .ready)
     }
 
+    // MARK: - Snapshot gate semantics
+
+    /// Asking for a missing snapshot should throw `snapshotNotInstalled`.
+    func testMissingSnapshotThrows() async throws {
+        let absent = ModelSnapshot.allCases.first { !ModelDownloadManager.isInstalled($0) }
+        guard let target = absent else {
+            throw XCTSkip("All snapshots are installed; no negative case to exercise.")
+        }
+        let cap: TTSCapability
+        switch target {
+        case .customVoice: cap = .customVoice
+        case .base:        cap = .voiceClone
+        case .voiceDesign: cap = .voiceDesign
+        }
+
+        do {
+            try await service.loadCapability(cap)
+            XCTFail("Expected snapshotNotInstalled error for \(target.rawValue)")
+        } catch let TTSError.snapshotNotInstalled(snap) {
+            XCTAssertEqual(snap, target)
+        } catch {
+            XCTFail("Expected snapshotNotInstalled, got \(error)")
+        }
+    }
+
     // MARK: - Helpers
 
-    private func skipUnlessModelsAvailable() throws {
-        guard MLXTTSService.areModelsAvailable() else {
+    private func skipUnlessInstalled(_ snapshot: ModelSnapshot) throws {
+        guard ModelDownloadManager.isInstalled(snapshot) else {
             throw XCTSkip(
-                "Qwen3-TTS model files not found in the managed directory. " +
-                "Run the app once to download them."
+                "\(snapshot.displayName) snapshot is not installed at " +
+                "\(ModelDownloadManager.directory(for: snapshot).path). " +
+                "Run the app once and download from the Model Manager."
             )
         }
     }
@@ -171,5 +225,49 @@ final class EndToEndAudioGenerationTests: XCTestCase {
 
         let rms = sqrt(samples.map { $0 * $0 }.reduce(0, +) / Float(samples.count))
         XCTAssertGreaterThan(rms, 1e-4, "[\(label)] Audio appears silent (RMS=\(rms))")
+    }
+
+    /// Encode `samples` as a 16-bit PCM mono WAV `Data` blob — same format
+    /// `AudioRecorder` produces, so it round-trips cleanly through
+    /// `MLXTTSService.loadReferenceAudio(_:)`.
+    private func makeWav(samples: [Float], sampleRate: Int) throws -> Data {
+        let channels: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let byteRate = UInt32(sampleRate * Int(channels) * Int(bitsPerSample) / 8)
+        let blockAlign = UInt16(Int(channels) * Int(bitsPerSample) / 8)
+
+        var pcm = Data(capacity: samples.count * 2)
+        for s in samples {
+            let clamped = max(-1, min(1, s))
+            let v = Int16(clamped * 32767.0)
+            var le = v.littleEndian
+            withUnsafeBytes(of: &le) { pcm.append(contentsOf: $0) }
+        }
+
+        var wav = Data()
+        wav.append("RIFF".data(using: .ascii)!)
+        var totalSize = UInt32(36 + pcm.count).littleEndian
+        withUnsafeBytes(of: &totalSize) { wav.append(contentsOf: $0) }
+        wav.append("WAVE".data(using: .ascii)!)
+        wav.append("fmt ".data(using: .ascii)!)
+        var fmtChunkSize = UInt32(16).littleEndian
+        withUnsafeBytes(of: &fmtChunkSize) { wav.append(contentsOf: $0) }
+        var audioFormat = UInt16(1).littleEndian
+        withUnsafeBytes(of: &audioFormat) { wav.append(contentsOf: $0) }
+        var ch = channels.littleEndian
+        withUnsafeBytes(of: &ch) { wav.append(contentsOf: $0) }
+        var sr = UInt32(sampleRate).littleEndian
+        withUnsafeBytes(of: &sr) { wav.append(contentsOf: $0) }
+        var br = byteRate.littleEndian
+        withUnsafeBytes(of: &br) { wav.append(contentsOf: $0) }
+        var ba = blockAlign.littleEndian
+        withUnsafeBytes(of: &ba) { wav.append(contentsOf: $0) }
+        var bps = bitsPerSample.littleEndian
+        withUnsafeBytes(of: &bps) { wav.append(contentsOf: $0) }
+        wav.append("data".data(using: .ascii)!)
+        var dataChunkSize = UInt32(pcm.count).littleEndian
+        withUnsafeBytes(of: &dataChunkSize) { wav.append(contentsOf: $0) }
+        wav.append(pcm)
+        return wav
     }
 }

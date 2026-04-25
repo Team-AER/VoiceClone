@@ -9,29 +9,82 @@ struct VoiceCloneView: View {
 
     @StateObject private var viewModel = VoiceCloneViewModel()
     @EnvironmentObject var container: DIContainer
+    @EnvironmentObject var downloadManager: ModelDownloadManager
+
+    @State private var showingModelManager = false
+    @State private var showingSaveSheet = false
+    @State private var saveVoiceName = ""
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                recordingSection
-                referenceTextField
-                targetTextField
-                languageSelector
-                waveformDisplay
-                controlButtons
-                synthesizeButton
+            Group {
+                if let missing = viewModel.missingSnapshot {
+                    VStack {
+                        Spacer()
+                        MissingSnapshotPrompt(snapshot: missing) {
+                            showingModelManager = true
+                        }
+                        Spacer()
+                    }
+                    .padding()
+                } else {
+                    cloneForm
+                }
             }
-            .padding()
             .navigationTitle("Clone")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showingModelManager = true
+                    } label: {
+                        Image(systemName: "icloud.and.arrow.down")
+                    }
+                    .help("Manage models")
+                }
+            }
             .task {
-                await viewModel.setup(ttsService: container.ttsService, audioEngine: container.audioEngine)
+                await viewModel.setup(
+                    ttsService: container.ttsService,
+                    audioEngine: container.audioEngine,
+                    voiceStorage: container.voiceStorage,
+                    downloadManager: downloadManager
+                )
             }
             .alert("Error", isPresented: errorBinding) {
                 Button("OK") { viewModel.clearError() }
             } message: {
                 Text(viewModel.error ?? "")
             }
+            .sheet(isPresented: $showingModelManager, onDismiss: viewModel.retrySetup) {
+                ModelManagerView(highlight: .base)
+                    .environmentObject(downloadManager)
+            }
+            .sheet(isPresented: $showingSaveSheet) {
+                SaveVoiceSheet(
+                    title: "Save cloned voice",
+                    placeholder: "e.g. My voice",
+                    name: $saveVoiceName
+                ) {
+                    let n = saveVoiceName
+                    showingSaveSheet = false
+                    saveVoiceName = ""
+                    Task { await viewModel.saveVoice(name: n) }
+                }
+            }
         }
+    }
+
+    private var cloneForm: some View {
+        VStack(spacing: 20) {
+            recordingSection
+            referenceTextField
+            targetTextField
+            languageSelector
+            waveformDisplay
+            controlButtons
+            synthesizeButton
+        }
+        .padding()
     }
 
     private var errorBinding: Binding<Bool> {
@@ -133,6 +186,13 @@ struct VoiceCloneView: View {
             }
             .disabled(viewModel.waveformSamples.isEmpty)
 
+            Button {
+                showingSaveSheet = true
+            } label: {
+                Label("Save Voice", systemImage: "square.and.arrow.down.on.square")
+            }
+            .disabled(!viewModel.canSaveVoice)
+
             Spacer()
 
             if let url = viewModel.exportURL {
@@ -181,4 +241,5 @@ struct VoiceCloneView: View {
 #Preview {
     VoiceCloneView()
         .environmentObject(DIContainer())
+        .environmentObject(ModelDownloadManager())
 }
