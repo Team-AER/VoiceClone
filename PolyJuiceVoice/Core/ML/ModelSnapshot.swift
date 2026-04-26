@@ -19,6 +19,9 @@
 //
 
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Axes
 
@@ -120,13 +123,17 @@ enum ModelPrecision: String, CaseIterable, Hashable, Sendable, Codable {
 
     /// The best default precision for the current platform and device RAM.
     /// macOS can comfortably run bf16. On iOS jetsam limits vary by device:
-    ///   ≥ 8 GB RAM (iPhone 15 Pro Max, iPad Pro M-series): q8
-    ///   ≥ 6 GB RAM (iPhone 14 Pro, iPhone 15): q8
+    ///   iPad Pro M-series (≥ 8 GB): bf16
+    ///   ≥ 6 GB RAM (iPhone 14 Pro, iPhone 15, iPhone 16): q8
     ///   < 6 GB RAM (older iPhones, 4 GB devices): q4
     static var platformDefault: ModelPrecision {
         #if os(iOS)
         let physicalBytes = ProcessInfo.processInfo.physicalMemory
         let physicalGB = Double(physicalBytes) / 1_073_741_824  // bytes → GiB
+        // iPad Pro M-series ships with ≥ 8 GB unified memory and a much higher
+        // jetsam ceiling than iPhone — bf16 fits comfortably there.
+        let isHighMemoryiPad = UIDevice.current.userInterfaceIdiom == .pad && physicalGB >= 8
+        if isHighMemoryiPad { return .bf16 }
         return physicalGB >= 6 ? .q8 : .q4
         #else
         return .bf16

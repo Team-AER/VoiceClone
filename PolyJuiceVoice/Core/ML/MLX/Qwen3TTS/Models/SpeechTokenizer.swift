@@ -842,14 +842,44 @@ public class Qwen3TTSSpeechTokenizer: Module {
         // Transpose: [batch, seq_len, 16] -> [batch, 16, seq_len]
         let codes = audioCodes.transposed(0, 2, 1)
 
-        // Decode
-        let wav = decoder(codes).squeezed(axis: 1)  // [batch, samples]
-
-        // Calculate valid lengths based on non-padding codes
+        // Valid-length tracking is computed from the full input regardless of windowing.
         let firstCodebook = audioCodes[0..., 0..., 0]  // [batch, seq_len]
         let validTokens = MLX.sum(firstCodebook .> 0, axis: 1)
         let audioLengths = validTokens * decodeUpsampleRate
 
+        #if os(iOS)
+        // Windowed decode: split into 50-frame windows with a 4-frame left-context
+        // overlap so causal-conv layers start warm. Each window is decoded and eval'd
+        // independently — peak command-buffer size stays at window scale (3–5×
+        // smaller than decoding the full sequence in one call).
+        let timeFrames = codes.dim(2)
+        let windowFrames = 50
+        let overlapFrames = 4
+        if timeFrames > windowFrames {
+            var audioChunks: [MLXArray] = []
+            var offset = 0
+            while offset < timeFrames {
+                let end = min(offset + windowFrames, timeFrames)
+                let contextStart = max(0, offset - overlapFrames)
+                let windowCodes = codes[0..., 0..., contextStart..<end]
+                var windowAudio = decoder(windowCodes).squeezed(axis: 1)[0]  // [samples]
+                eval(windowAudio)
+                GPU.clearCache()
+                // Strip the left-context output: those samples came from a cold-start
+                // conv state and duplicate the tail of the previous window's output.
+                let discardSamples = (offset - contextStart) * decodeUpsampleRate
+                if discardSamples > 0 && discardSamples < windowAudio.dim(0) {
+                    windowAudio = windowAudio[discardSamples...]
+                }
+                audioChunks.append(windowAudio)
+                offset = end
+            }
+            let combined = MLX.concatenated(audioChunks, axis: 0).reshaped([1, -1])
+            return (combined, audioLengths)
+        }
+        #endif
+
+        let wav = decoder(codes).squeezed(axis: 1)  // [batch, samples]
         return (wav, audioLengths)
     }
 

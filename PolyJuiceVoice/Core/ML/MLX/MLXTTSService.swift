@@ -544,10 +544,13 @@ final class MLXTTSService: ObservableObject {
         guard let tokenizer = model.speechTokenizer else {
             throw TTSError.synthesisError("Speech tokenizer not available for voice cloning.")
         }
-        // bf16 cast: the encoder processes in the model's native dtype anyway.
-        let refArray = MLXArray(referenceSamples).asType(.bfloat16)
-        // Deserialize pre-computed refCodes if available — skips the encoder.
+        // Deserialize pre-computed refCodes first — when present, the encoder is
+        // skipped inside generateClonedVoiceCodes so the bf16 tensor is never read.
         let cachedCodes = preComputedEmbedding.flatMap { VoiceEmbeddingCodec.decode($0) }
+        // Build the reference tensor only when the encoder will actually consume it.
+        let refArray = cachedCodes == nil
+            ? MLXArray(referenceSamples).asType(.bfloat16)
+            : MLX.zeros([1])  // unused placeholder when cachedCodes is set
 
         // Phase 1 — AR loop: produces materialized fullCodes.
         let codes = try model.generateClonedVoiceCodes(

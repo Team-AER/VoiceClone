@@ -1491,12 +1491,67 @@ public class Qwen3TTSModel: Module {
         let configData = try Data(contentsOf: configPath)
         let config = try JSONDecoder().decode(Qwen3TTSModelConfig.self, from: configData)
 
-        // Load weights first (need to detect quantized embeddings before model creation)
-        var weights: [String: MLXArray] = [:]
         let fileManager = FileManager.default
         let files = try fileManager.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)
         let safetensorFiles = files.filter { $0.pathExtension == "safetensors" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
+        let sentinelKeys = [
+            "talker.model.text_embedding.weight",
+            "talker.model.layers.0.self_attn.q_proj.weight",
+            "talker.model.norm.weight",
+        ]
+
+        // Sharded safetensors (bf16 only) → process one shard at a time so peak
+        // transient memory is (model + 1 shard) instead of (model + all shards).
+        // For the 1.7B bf16 model that's ~4.5 GB peak vs ~7 GB.
+        // Quantized variants always ship as a single file and use the path below.
+        if safetensorFiles.count > 1 {
+            // bf16 shards carry no quantized-embedding .scales keys, so the
+            // quantize() and post-load embedding-quantization steps are skipped.
+            let model = try Qwen3TTSModel(config)
+
+            var textTokenMap: MLXArray? = nil
+            var seenKeys: Set<String> = []
+
+            for file in safetensorFiles {
+                var shardWeights = try MLX.loadArrays(url: file)
+                var sanitizedShard = sanitize(weights: shardWeights)
+                shardWeights.removeAll()
+
+                seenKeys.formUnion(sanitizedShard.keys)
+                if let map = sanitizedShard.removeValue(forKey: "talker.model.text_token_map") {
+                    textTokenMap = map
+                }
+
+                try model.update(parameters: ModuleParameters.unflattened(sanitizedShard), verify: [])
+                sanitizedShard.removeAll()
+            }
+
+            let missingShardKeys = sentinelKeys.filter { !seenKeys.contains($0) }
+            if !missingShardKeys.isEmpty {
+                AppLog.warning(
+                    "Weight key audit: \(missingShardKeys.count) expected key(s) missing — " +
+                    "[\(missingShardKeys.joined(separator: ", "))]. " +
+                    "The mlx-community snapshot may have been updated with renamed tensors. " +
+                    "Run WeightKeyAuditTests and update WeightKeyMap.swift if needed.",
+                    "model"
+                )
+            }
+
+            if let tokenMap = textTokenMap {
+                model.talker.model.textTokenMap = tokenMap
+                debugPrint("🔊 Loaded pruned vocabulary token map: \(tokenMap.shape)")
+            }
+
+            eval(model)
+            try await model.postLoadHook(modelDir: modelDir)
+            return model
+        }
+
+        // Single-file path (quantized variants):
+        // Load weights first (need to detect quantized embeddings before model creation)
+        var weights: [String: MLXArray] = [:]
         for file in safetensorFiles {
             let fileWeights = try MLX.loadArrays(url: file)
             weights.merge(fileWeights) { _, new in new }
@@ -1542,11 +1597,6 @@ public class Qwen3TTSModel: Module {
         // must be present in every valid Qwen3-TTS snapshot. If a future
         // mlx-community release renames tensors, this catches the mismatch
         // at load time with a clear message instead of silent inference failure.
-        let sentinelKeys = [
-            "talker.model.text_embedding.weight",
-            "talker.model.layers.0.self_attn.q_proj.weight",
-            "talker.model.norm.weight",
-        ]
         let missingKeys = sentinelKeys.filter { !sanitizedWeights.keys.contains($0) }
         if !missingKeys.isEmpty {
             AppLog.warning(
