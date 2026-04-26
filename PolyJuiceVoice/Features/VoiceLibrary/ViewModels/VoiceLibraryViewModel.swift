@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import Combine
 
 @MainActor
 final class VoiceLibraryViewModel: ObservableObject {
@@ -63,10 +64,22 @@ final class VoiceLibraryViewModel: ObservableObject {
     }
 
     private var storage: VoiceStorage?
+    private var remoteChangeCancellable: AnyCancellable?
 
     func setup(storage: VoiceStorage) async {
         self.storage = storage
         await loadVoices()
+
+        // When iCloud sync is active, reload the library whenever CloudKit
+        // delivers a change from another device.
+        if ICloudSyncSettings.shared.activeAtStartup {
+            remoteChangeCancellable = NotificationCenter.default
+                .publisher(for: CoreDataStack.didReceiveRemoteChange)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    Task { await self?.loadVoices() }
+                }
+        }
     }
 
     func loadVoices() async {

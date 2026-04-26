@@ -16,6 +16,7 @@ import SwiftUI
 struct SettingsView: View {
 
     @EnvironmentObject private var downloadManager: ModelDownloadManager
+    @ObservedObject private var iCloudSettings = ICloudSyncSettings.shared
     @State private var showingModelManager = false
 
     var body: some View {
@@ -23,6 +24,42 @@ struct SettingsView: View {
             ScrollView {
                 GlassEffectContainer(spacing: 18) {
                     VStack(alignment: .leading, spacing: 22) {
+                        section(title: "iCloud Sync") {
+                            VStack(spacing: 0) {
+                                HStack(spacing: 14) {
+                                    iconBadge("icloud", tint: .blue)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Sync across devices")
+                                        Text("Voices sync privately via your iCloud account — no extra login beyond your Apple ID.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(3)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Spacer(minLength: 8)
+                                    Toggle("", isOn: iCloudToggleBinding)
+                                        .labelsHidden()
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+
+                                if iCloudSettings.pendingRestart {
+                                    Divider()
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "arrow.clockwise.circle.fill")
+                                            .foregroundStyle(.orange)
+                                        Text("Restart the app to apply this change.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                }
+                            }
+                            .background(rowGroupSurface)
+                        }
+
                         section(title: "Storage") {
                             VStack(spacing: 1) {
                                 actionRow(
@@ -215,6 +252,15 @@ struct SettingsView: View {
             .frame(width: 30, height: 30)
             .background(tint.gradient, in: .rect(cornerRadius: 7, style: .continuous))
             .accessibilityHidden(true)
+    }
+
+    // MARK: - iCloud
+
+    private var iCloudToggleBinding: Binding<Bool> {
+        Binding(
+            get: { iCloudSettings.isEnabled },
+            set: { iCloudSettings.setEnabled($0) }
+        )
     }
 
     // MARK: - Derived data

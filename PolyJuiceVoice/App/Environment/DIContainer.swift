@@ -32,6 +32,22 @@ final class DIContainer: ObservableObject {
                 AppLog.warning("Voice library prune failed: \(error.localizedDescription)", "storage")
             }
         }
+
+        // Phase 6: migrate local voice files into the iCloud container the
+        // first time the user enables sync.
+        // TODO: Delete this migration after all users have been on
+        // iCloud-enabled builds for 3+ months.
+        if ICloudSyncSettings.shared.activeAtStartup {
+            Task.detached(priority: .background) {
+                do {
+                    try await storage.migrateLocalFilesToICloud()
+                } catch {
+                    AppLog.warning(
+                        "iCloud file migration failed: \(error.localizedDescription)", "storage"
+                    )
+                }
+            }
+        }
     }
 }
 

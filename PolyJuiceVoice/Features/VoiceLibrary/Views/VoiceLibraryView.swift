@@ -8,6 +8,7 @@ import SwiftUI
 struct VoiceLibraryView: View {
 
     @StateObject private var viewModel = VoiceLibraryViewModel()
+    @StateObject private var syncMonitor = ICloudSyncStatusMonitor()
     @EnvironmentObject var container: DIContainer
 
     var body: some View {
@@ -51,6 +52,13 @@ struct VoiceLibraryView: View {
             }
             .navigationTitle("Library")
             .toolbar {
+                // iCloud sync status — only shown when sync is active.
+                if ICloudSyncSettings.shared.activeAtStartup {
+                    ToolbarItem(placement: .automatic) {
+                        syncStatusIndicator
+                    }
+                }
+
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         sortMenu
@@ -65,7 +73,9 @@ struct VoiceLibraryView: View {
                             }
                         }
                     } label: {
-                        Label("Filter", systemImage: viewModel.hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        Label("Filter", systemImage: viewModel.hasActiveFilters
+                              ? "line.3.horizontal.decrease.circle.fill"
+                              : "line.3.horizontal.decrease.circle")
                     }
                 }
             }
@@ -79,6 +89,31 @@ struct VoiceLibraryView: View {
             }
         }
     }
+
+    // MARK: - Sync indicator
+
+    @ViewBuilder
+    private var syncStatusIndicator: some View {
+        switch syncMonitor.status {
+        case .notEnabled:
+            EmptyView()
+        case .notAvailable:
+            Image(systemName: "exclamationmark.icloud")
+                .foregroundStyle(.secondary)
+                .help("iCloud is unavailable. Sign in to iCloud to sync your library.")
+        case .synced:
+            Image(systemName: "checkmark.icloud")
+                .foregroundStyle(.secondary)
+                .help("Library is synced via iCloud.")
+        case .syncing:
+            Image(systemName: "icloud.and.arrow.up")
+                .foregroundStyle(.secondary)
+                .symbolEffect(.pulse)
+                .help("Syncing with iCloud…")
+        }
+    }
+
+    // MARK: - Filter menus
 
     private var sortMenu: some View {
         Menu("Sort By") {
@@ -147,9 +182,7 @@ struct VoiceLibraryView: View {
     private var errorBinding: Binding<Bool> {
         Binding(
             get: { viewModel.error != nil },
-            set: { newValue in
-                if !newValue { viewModel.clearError() }
-            }
+            set: { newValue in if !newValue { viewModel.clearError() } }
         )
     }
 }

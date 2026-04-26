@@ -12,5 +12,20 @@
     <true/>
     <key>com.apple.security.files.downloads.read-write</key>
     <true/>
+    <!-- iCloud sync (opt-in). Also enable via Xcode → Signing & Capabilities
+         → iCloud for both targets (adds these automatically for iOS too). -->
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+        <string>iCloud.app.aer.PolyJuiceVoice</string>
+    </array>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+        <string>CloudDocuments</string>
+        <string>CloudKit</string>
+    </array>
+    <key>com.apple.developer.ubiquity-container-identifiers</key>
+    <array>
+        <string>iCloud.app.aer.PolyJuiceVoice</string>
+    </array>
 </dict>
 </plist>

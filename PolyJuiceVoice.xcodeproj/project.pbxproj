@@ -476,12 +476,10 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = PolyJuiceVoice/PolyJuiceVoice.macOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "3rd Party Mac Developer Application";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = "";
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = NLFUV2R63H;
+				DEVELOPMENT_TEAM = NLFUV2R63H;
 				ENABLE_PREVIEWS = YES;
 				EXCLUDED_ARCHS = "i386 x86_64";
 				GENERATE_INFOPLIST_FILE = YES;
@@ -506,7 +504,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = app.aer.PolyJuiceVoice;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = app.aer.PolyJuiceVoice;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SUPPORTS_MACCATALYST = NO;
