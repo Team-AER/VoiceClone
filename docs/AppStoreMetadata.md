@@ -1,6 +1,6 @@
-# PolyJuiceVoice — App Store Connect metadata
+# PolyJuiceVoice — App Store Connect Metadata
 
-Drop these straight into App Store Connect for the 1.0.0 submission.
+Copy-paste ready for the 1.0.0 submission. Replace `YOUR_GITHUB_USERNAME` with your actual GitHub handle before submitting.
 
 ---
 
@@ -13,179 +13,175 @@ PolyJuiceVoice
 ## Subtitle (max 30 chars)
 
 ```
-On-device voice synthesis
+On-device AI voice synthesis
 ```
 
-## Promotional Text (max 170 chars; can be updated without re-submission)
+## Promotional Text (max 170 chars — updatable without re-submission)
 
 ```
-Take on any voice, design new ones from a description, or speak in a built-in style — entirely on-device. Your audio never leaves your Mac or iPhone.
+Clone any voice, design new ones from a description, or speak with built-in styles — 100% on-device. Your recordings never leave your Mac or iPhone.
 ```
+
+---
 
 ## Description (max 4000 chars)
 
 ```
-PolyJuiceVoice is on-device text-to-speech with three magical capabilities — built on Apple's MLX framework so every word is synthesized locally on your Mac or iPhone. Your text and recordings never leave the device.
+PolyJuiceVoice is on-device text-to-speech with three powerful capabilities -- powered by Apple's MLX framework so every word is synthesized locally on your Mac or iPhone. Your voice recordings and text never leave the device.
 
-— SPEAK —
+--- SPEAK ---
 Pick a built-in voice and read any text aloud, with optional style guidance like "calm and warm" or "energetic and confident." Long passages stream as they're generated, so you hear the first sentence in seconds.
 
-— DESIGN —
-Describe the voice you want — "a wise narrator with a slight British lilt" — and PolyJuiceVoice generates a brand-new speaker that matches. Save it to your library and re-use it for any future text.
+--- DESIGN ---
+Describe the voice you want -- "a wise narrator with a slight British lilt" -- and PolyJuiceVoice generates a brand-new speaker that matches. Save it to your library and reuse it for any future text.
 
-— CLONE —
-Record a few seconds of any voice (your own, with consent), then synthesize new sentences in that voice. Perfect for personal voice messages, accessibility, audiobook drafts, or character voices for storytelling.
+--- CLONE ---
+Record a few seconds of any voice (your own, or with the speaker's consent), then synthesize new sentences in that style. Perfect for personal voice messages, accessibility tools, audiobook drafts, and character voices.
 
-— PRIVACY-FIRST BY DESIGN —
-• 100% on-device synthesis. No cloud APIs, no audio uploads.
-• No accounts, no analytics, no tracking.
-• Models download once from Hugging Face on first launch (~4 GB) and stay local forever after.
+NOTE: Use voice cloning only with the explicit consent of the person whose voice you record.
 
-— BUILT FOR APPLE SILICON —
-PolyJuiceVoice uses Metal-accelerated inference via Apple's MLX framework for fast, energy-efficient synthesis. Designed for iOS 26 and macOS 26 with Liquid Glass throughout.
+--- PRIVACY-FIRST ---
+* 100% on-device synthesis. No cloud APIs, no audio uploads.
+* No accounts, no analytics, no tracking.
+* AI model weights (~4 GB) download once on first launch and stay local forever.
 
-— FOR EVERYONE —
-Built-in voices speak in English, Chinese, Japanese, Korean, Spanish, French, and German. Save unlimited voices to your personal library, export to WAV, and share generated audio anywhere.
+--- BUILT FOR APPLE SILICON ---
+Metal-accelerated inference via Apple's MLX framework for fast, energy-efficient synthesis. Designed for macOS 26 and iOS 26.
 
-PolyJuiceVoice is built on the open-source Qwen3-TTS model (Apache 2.0).
+--- LANGUAGES ---
+Built-in voices speak English, Chinese, Japanese, Korean, Spanish, French, and German. Export synthesized audio as WAV and share it anywhere.
 
-Requires Apple Silicon. iOS Simulator is not supported.
+Built on the open-source Qwen3-TTS model (Apache 2.0). Requires Apple Silicon.
 ```
+
+---
 
 ## Keywords (max 100 chars, comma-separated)
 
 ```
-tts,voice,clone,ai,mlx,speech,narration,audiobook,podcast,accessibility,offline,private,on-device
+tts,voice clone,ai voice,speech,narration,audiobook,on-device,offline,private,mlx,accessibility
 ```
 
-## Support URL
-
-```
-https://github.com/prakharshukla/polyjuicevoice/issues
-```
-
-## Marketing URL (optional)
-
-```
-https://github.com/prakharshukla/polyjuicevoice
-```
-
-## Privacy Policy URL (required)
-
-```
-https://github.com/prakharshukla/polyjuicevoice/blob/main/PRIVACY.md
-```
+*(99 characters — within limit)*
 
 ---
 
-## What's New in This Version (max 4000 chars — for 1.0.0)
+## URLs
+
+| Field | Value |
+|---|---|
+| **Support URL** | `https://github.com/Team-AER/PolyJuiceVoice/issues` |
+| **Marketing URL** | `https://github.com/Team-AER/PolyJuiceVoice` |
+| **Privacy Policy URL** | `https://github.com/Team-AER/PolyJuiceVoice/blob/main/docs/PRIVACY_POLICY.md` |
+
+> The privacy policy file lives at `docs/PRIVACY_POLICY.md` in this repo. Push to GitHub and the raw URL above will work.
+
+---
+
+## What's New in This Version (v1.0.0)
 
 ```
-✨ The first public release of PolyJuiceVoice.
+The first release of PolyJuiceVoice.
 
 • Speak with built-in voices (Vivian, Ryan, and more) in 7 languages
 • Design new voices from a free-text description
 • Clone a voice from a short reference recording
-• Save unlimited voices to your library
-• 100% on-device synthesis — your audio never leaves your hardware
-• Built for iOS 26 and macOS 26 with Liquid Glass throughout
+• Save unlimited voices to your personal library
+• Export synthesized audio as WAV
+• 100% on-device — your audio never leaves your hardware
 • Optimized for Apple Silicon via Apple's MLX framework
+• Built for macOS 26 and iOS 26
 ```
 
 ---
 
-## Privacy Nutrition Label (App Privacy section)
+## Notes for Apple Reviewer
+
+> Paste this verbatim into the **Notes** field under App Review Information in App Store Connect.
+
+```
+On first launch, PolyJuiceVoice downloads approximately 4 GB of AI model
+weights (Qwen3-TTS) from huggingface.co. This is a one-time download required
+for on-device AI inference — no processing is done in the cloud. The app
+displays a download progress screen with an ETA before the main UI appears.
+
+A network connection is required for the initial model download only. After
+that, the app runs fully offline.
+
+The Voice Cloning feature requires microphone access to record a reference
+audio sample. All audio is processed on-device and never transmitted.
+
+There is no login or account required to test the app.
+```
+
+---
+
+## Privacy Nutrition Label
+
+Answer these questions in App Store Connect under **App Privacy**:
 
 | Question | Answer |
 |---|---|
-| Does this app collect data? | **No** |
-| Does this app use third-party SDKs that collect data? | **No** |
-| Does this app track users across other apps and websites? | **No** |
+| Does this app collect data linked to the user's identity? | **No** |
+| Does this app collect data not linked to identity? | **No** |
+| Does this app track users across apps/websites? | **No** |
 
-Privacy categories: **None** — there is nothing to declare.
+Select **No** for all data collection categories. There is nothing to declare.
 
 ---
 
 ## Age Rating
 
-| Question | Answer |
-|---|---|
-| Cartoon or Fantasy Violence | None |
-| Realistic Violence | None |
-| Sexual Content or Nudity | None |
-| Profanity or Crude Humor | None |
-| Mature/Suggestive Themes | None |
-| Horror/Fear Themes | None |
-| Medical/Treatment Information | None |
-| Alcohol, Tobacco, or Drug Use or References | None |
-| Simulated Gambling | None |
-| Contests | None |
-| Unrestricted Web Access | None |
-| User Generated Content | None |
+Answer **None** to every question in the questionnaire. Resulting rating: **4+**.
 
-Resulting rating: **4+**.
-
-⚠ **Disclosure to add in the description**: voice cloning carries an ethical
-responsibility. Add the line "Use voice cloning only with the consent of the
-person whose voice you record" prominently in onboarding before submission.
+> One note: voice cloning can be misused. The description already includes the consent line — Apple does not currently require a higher age rating for this, but keep it in the description to demonstrate responsible disclosure.
 
 ---
 
 ## Categories
 
-- **Primary**: Productivity
-- **Secondary**: Utilities
-
-(Both are reasonable. Productivity ranks the app alongside other creator
-tools; Utilities reflects that it's a building-block app rather than a
-content app.)
-
----
-
-## Localizations to add (post-launch)
-
-The app's UI uses `LocalizedStringKey` literals throughout, so adding a
-language is purely a translation exercise:
-
-1. In Xcode: File → New → File → String Catalog. Already added at
-   `PolyJuiceVoice/Resources/Localizable.xcstrings` (empty — Xcode auto-fills
-   on next build).
-2. After the next build, every UI string appears in the catalog.
-3. Add target languages (Spanish, Mandarin, Japanese suggested first).
-4. Send the catalog to a translator — they edit JSON-like rows.
-5. Re-build, ship, no code changes.
-
----
-
-## Screenshots
-
-App Store Connect needs screenshots for both iOS and macOS at the standard
-sizes. Take them with the app in **dark mode** (the Liquid Glass effect
-shows best against a dark background) and showing:
-
-| Screenshot | Tab/state |
+| | Category |
 |---|---|
-| 1 | **Speak** — voice picker open, text typed, waveform visible mid-playback |
-| 2 | **Clone** — recording in progress, level meter active |
-| 3 | **Design** — voice description filled in, "Generate" CTA prominent |
-| 4 | **Library** — list of saved voices |
-| 5 | **Settings** — model storage row showing disk usage |
+| **Primary** | Productivity |
+| **Secondary** | Utilities |
 
 ---
 
-## Real-device test checklist (before submitting)
+## Pricing & Availability
 
-Run these on a physical iPhone (not the Simulator — MLX requires Metal):
+- **Price**: Free (recommended for 1.0 to maximize adoption)
+- **Availability**: All territories, or start with US/UK/CA/AU
+- **Distribution**: App Store (not for Business or Education only)
 
-- [ ] First-launch download: model gate appears, downloads complete with progress bar showing ETA
-- [ ] Disk-space precheck: fill device to <5 GB free, verify download is refused with friendly error
-- [ ] Mic permission grant + deny flow on Clone tab; "Open Settings" button works after deny
-- [ ] Phone-call interruption mid-playback: audio pauses, resumes after call ends
-- [ ] Headphones unplug mid-playback: audio pauses
-- [ ] Background → foreground: re-enter app after 30s; UI and engine state intact
-- [ ] Memory warning (iPhone 12 or older): model unloads gracefully, can re-load
-- [ ] Voice library round-trip: save a cloned voice, force-quit, relaunch, verify it's there + plays correctly
-- [ ] Long text (>1500 chars): warning surfaces, synthesis still completes
-- [ ] Empty / whitespace-only / >8000 chars: rejected with friendly errors
-- [ ] Dark mode + Liquid Glass renders cleanly on every tab
-- [ ] VoiceOver: navigate every tab via swipe; all icon-only buttons have labels
+---
+
+## Screenshot Plan
+
+Take screenshots in **dark mode** — the Liquid Glass effect reads best on a dark background. Required sizes:
+
+**macOS** (at least one of): 1280×800 or 1440×900 px  
+**iOS** (required): 6.9" — iPhone 16 Pro Max (1320×2868 px)
+
+| # | Screen | What to show |
+|---|---|---|
+| 1 | **Speak** | Voice picker open, text filled in, waveform visible |
+| 2 | **Design** | Voice description typed, Generate button prominent |
+| 3 | **Clone** | Recording in progress, level meter active |
+| 4 | **Library** | List of saved voices with names and types |
+| 5 | **Export / Share** | Share sheet open after export |
+
+---
+
+## Pre-Submission Checklist
+
+- [ ] GitHub repo is public (for support/privacy policy URLs to resolve)
+- [ ] Privacy policy URL returns HTTP 200
+- [ ] Support URL returns HTTP 200
+- [ ] macOS archive builds cleanly with Release signing
+- [ ] First-launch model download tested end-to-end on a physical device
+- [ ] Microphone permission prompt tested: grant and deny flows both work
+- [ ] Voice library round-trip: save a voice, force-quit, relaunch, verify it persists
+- [ ] Reviewer Notes pasted into App Review Information in App Store Connect
+- [ ] Age rating questionnaire completed (4+)
+- [ ] Pricing set
+- [ ] At least one screenshot uploaded per required device size
