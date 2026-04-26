@@ -36,6 +36,13 @@ final class AudioEngine: ObservableObject {
     private var scheduledBuffers: Int = 0
     private var completedBuffers: Int = 0
     private var interruptionObservers: [NSObjectProtocol] = []
+    /// Frame offset added to `playerNode.playerTime` when reporting `currentTime`.
+    /// Used by file-based seek so a segment starting at file frame N still
+    /// reports the correct wall-clock position.
+    private var playbackStartOffset: TimeInterval = 0
+    /// Held during file-based playback so the underlying file outlives the
+    /// `AVAudioPlayerNode.scheduleFile/Segment` read window.
+    private var currentFile: AVAudioFile?
 
     init(sampleRate: Double = 24000) {
         self.format = AVAudioFormat(
@@ -58,6 +65,7 @@ final class AudioEngine: ObservableObject {
         duration = 0
         scheduledBuffers = 0
         completedBuffers = 0
+        playbackStartOffset = 0
 
         startTimeTracking()
 
@@ -105,6 +113,8 @@ final class AudioEngine: ObservableObject {
         isPlaying = false
         currentTime = 0
         duration = 0
+        playbackStartOffset = 0
+        currentFile = nil
         stopTimeTracking()
     }
 
@@ -118,45 +128,54 @@ final class AudioEngine: ObservableObject {
         isPlaying = true
     }
 
-    func seek(to time: TimeInterval, totalDuration: TimeInterval, chunks: [AudioChunk]) async throws {
-        guard time >= 0, time <= totalDuration else { return }
+    /// Plays a previously-written WAV file from disk. The file streams via
+    /// `AVAudioPlayerNode.scheduleFile` — no per-chunk PCM buffer allocations,
+    /// so memory stays flat regardless of utterance length.
+    func playFile(_ url: URL) async throws {
+        try await playFile(url, from: 0)
+    }
+
+    /// Resumes playback of a previously-written WAV file at the given offset
+    /// (in seconds, clamped to the file's duration).
+    func playFile(_ url: URL, from time: TimeInterval) async throws {
+        let file = try AVAudioFile(forReading: url)
+        let processingFormat = file.processingFormat
+        let totalFrames = file.length
+        let totalDuration = Double(totalFrames) / processingFormat.sampleRate
+        let clampedTime = max(0, min(time, totalDuration))
+        let startFrame = AVAudioFramePosition(clampedTime * processingFormat.sampleRate)
+        let frameCount = AVAudioFrameCount(max(0, totalFrames - startFrame))
+        guard frameCount > 0 else { return }
+
+        if isPlaying || engine.isRunning {
+            stop()
+        }
+
+        configureAudioSessionIfNeeded()
+        // The synthesis-time format and the file format match (Float32 mono
+        // 24 kHz today), so the prebuilt connection set up in `init` is reused
+        // as-is. If they ever diverge, reconnect playerNode here.
+
+        try engine.start()
+        playerNode.play()
+        isPlaying = true
+
+        duration = totalDuration
+        currentTime = clampedTime
+        playbackStartOffset = clampedTime
+        currentFile = file
+        startTimeTracking()
+
+        await withCheckedContinuation { continuation in
+            playerNode.scheduleSegment(file,
+                                       startingFrame: startFrame,
+                                       frameCount: frameCount,
+                                       at: nil) {
+                Task { @MainActor in continuation.resume() }
+            }
+        }
 
         stop()
-
-        var elapsed: TimeInterval = 0
-        var startChunkIndex = 0
-        var offsetInChunk = 0
-
-        for (index, chunk) in chunks.enumerated() {
-            let chunkDuration = Double(chunk.samples.count) / Double(chunk.sampleRate)
-            if elapsed + chunkDuration >= time {
-                startChunkIndex = index
-                offsetInChunk = Int((time - elapsed) * Double(chunk.sampleRate))
-                break
-            }
-            elapsed += chunkDuration
-        }
-
-        let remainingStream = AsyncThrowingStream<AudioChunk, Error> { continuation in
-            Task {
-                for index in startChunkIndex..<chunks.count {
-                    var chunk = chunks[index]
-                    if index == startChunkIndex && offsetInChunk > 0 {
-                        let remainingSamples = Array(chunk.samples[offsetInChunk...])
-                        chunk = AudioChunk(
-                            samples: remainingSamples,
-                            sampleRate: chunk.sampleRate,
-                            timestamp: chunk.timestamp
-                        )
-                    }
-                    continuation.yield(chunk)
-                }
-                continuation.finish()
-            }
-        }
-
-        currentTime = time
-        try await playStream(remainingStream)
     }
 
     // MARK: - Private
@@ -298,8 +317,8 @@ final class AudioEngine: ObservableObject {
         buffer.frameLength = AVAudioFrameCount(chunk.samples.count)
 
         let channelData = buffer.floatChannelData![0]
-        for (i, sample) in chunk.samples.enumerated() {
-            channelData[i] = sample
+        chunk.samples.withUnsafeBytes { src in
+            _ = memcpy(channelData, src.baseAddress, src.count)
         }
 
         return buffer
@@ -339,7 +358,11 @@ final class AudioEngine: ObservableObject {
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
             return
         }
-        currentTime = Double(playerTime.sampleTime) / playerTime.sampleRate
+        // playerTime.sampleTime resets to 0 on each `playerNode.play()`, so we
+        // add the offset captured at scheduleSegment time to report the true
+        // file position when the user has seeked.
+        let elapsed = Double(playerTime.sampleTime) / playerTime.sampleRate
+        currentTime = playbackStartOffset + elapsed
     }
 
     private func decodeAudio(data: Data, format: AudioFormat) throws -> AVAudioPCMBuffer {

@@ -41,8 +41,10 @@ final class VoiceCloningViewModel: ObservableObject {
     private var selectionStore: ModelSelectionStore?
     private var referenceAudioURL: URL?
     private var referenceAudioData: Data?
-    private var generatedChunks: [AudioChunk] = []
-    private var generatedSamples: [Float] = []
+    /// Disk-backed canonical state for the most recent synthesis. Replaces
+    /// the per-chunk in-memory `[Float]` accumulators that were the dominant
+    /// memory hotspot during/after generation.
+    private var audioFileURL: URL?
     private var cancellables = Set<AnyCancellable>()
 
     var canSynthesize: Bool {
@@ -216,10 +218,21 @@ final class VoiceCloningViewModel: ObservableObject {
             return
         }
         canSaveVoice = false
-        generatedChunks = []
-        generatedSamples = []
         waveformSamples = []
         exportURL = nil
+        if let previous = audioFileURL {
+            try? FileManager.default.removeItem(at: previous)
+            audioFileURL = nil
+        }
+
+        let writer: IncrementalAudioWriter
+        do {
+            writer = try IncrementalAudioWriter(sampleRate: 24000)
+        } catch {
+            self.error = error.localizedDescription
+            isSynthesizing = false
+            return
+        }
 
         var playbackContinuation: AsyncThrowingStream<AudioChunk, Error>.Continuation?
         var playbackTask: Task<Void, Error>?
@@ -240,13 +253,10 @@ final class VoiceCloningViewModel: ObservableObject {
             )
 
             for try await chunk in stream {
-                generatedChunks.append(chunk)
-                generatedSamples.append(contentsOf: chunk.samples)
-                waveformSamples = downsample(generatedSamples, to: 100)
+                try writer.append(chunk.samples)
+                waveformSamples = writer.peaks
                 playbackContinuation?.yield(chunk)
             }
-
-            canSaveVoice = !generatedChunks.isEmpty
 
             playbackContinuation?.finish()
             if let playbackTask {
@@ -256,7 +266,15 @@ final class VoiceCloningViewModel: ObservableObject {
                     self.error = error.localizedDescription
                 }
             }
+
+            if writer.sampleCount > 0 {
+                audioFileURL = writer.finalize()
+                canSaveVoice = true
+            } else {
+                writer.discard()
+            }
         } catch {
+            writer.discard()
             playbackContinuation?.finish(throwing: error)
             playbackTask?.cancel()
             self.error = error.localizedDescription
@@ -316,15 +334,9 @@ final class VoiceCloningViewModel: ObservableObject {
         guard let engine = audioEngine else { return }
         if isPlaying {
             engine.stop()
-        } else if !generatedChunks.isEmpty {
-            Task { [generatedChunks] in
-                let playbackStream = AsyncThrowingStream<AudioChunk, Error> { continuation in
-                    for chunk in generatedChunks {
-                        continuation.yield(chunk)
-                    }
-                    continuation.finish()
-                }
-                try? await engine.playStream(playbackStream)
+        } else if let url = audioFileURL {
+            Task {
+                try? await engine.playFile(url)
             }
         }
     }
@@ -334,21 +346,14 @@ final class VoiceCloningViewModel: ObservableObject {
     }
 
     func export() {
+        guard let url = audioFileURL else {
+            self.error = "No audio to export."
+            return
+        }
         do {
-            exportURL = try AudioExporter.exportWav(samples: generatedSamples, sampleRate: 24000)
+            exportURL = try AudioExporter.exportWav(from: url)
         } catch {
             self.error = error.localizedDescription
-        }
-    }
-
-    private func downsample(_ samples: [Float], to count: Int) -> [Float] {
-        guard samples.count > count else { return samples }
-
-        let chunkSize = samples.count / count
-        return stride(from: 0, to: samples.count, by: chunkSize).map { start in
-            let end = min(start + chunkSize, samples.count)
-            let chunk = samples[start..<end]
-            return chunk.max() ?? 0
         }
     }
 }
