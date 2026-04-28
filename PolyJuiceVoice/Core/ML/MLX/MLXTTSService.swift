@@ -545,7 +545,9 @@ final class MLXTTSService: ObservableObject {
             throw TTSError.synthesisError("Speech tokenizer not available for voice cloning.")
         }
         // Deserialize pre-computed refCodes first — when present, the encoder is
-        // skipped inside generateClonedVoiceCodes so the bf16 tensor is never read.
+        // skipped inside generateClonedVoiceCodes so the placeholder is never read.
+        // A nil result (stale v0 blob, truncation, etc.) silently falls back to
+        // re-extracting from referenceSamples.
         let cachedCodes = preComputedEmbedding.flatMap { VoiceEmbeddingCodec.decode($0) }
         // Build the reference tensor only when the encoder will actually consume it.
         let refArray = cachedCodes == nil
@@ -717,43 +719,54 @@ final class MLXTTSService: ObservableObject {
 
 // MARK: - Voice embedding codec
 
-/// Serialise/deserialise a refCodes MLXArray ([1, 16, refTime] in float16)
-/// to/from `Data` for persistent storage in `Voice.embeddingData`.
+/// Serialise/deserialise a refCodes MLXArray ([1, 16, refTime] of Int32
+/// codebook indices) to/from `Data` for persistent storage in
+/// `Voice.embeddingData`.
 ///
-/// Format: [ndim: Int32][dim₀: Int32]…[dimₙ: Int32][float16 bytes…]
+/// Format: [magic: 4 bytes "PVC1"][ndim: Int32][dim₀: Int32]…[dimₙ: Int32][int32 bytes…]
+///
+/// The magic header rejects any blob written by the v0 codec, which stored
+/// codes as float16 — those values lose precision above 2048 and decode to a
+/// non-integral dtype that crashes the embedding gather. A nil return makes
+/// the caller fall back to re-extracting refCodes from the reference audio.
 enum VoiceEmbeddingCodec {
 
+    private static let magic: [UInt8] = [0x50, 0x56, 0x43, 0x31]  // "PVC1"
+
     static func encode(_ array: MLXArray) -> Data {
-        let f16 = array.asType(.float16)
-        eval(f16)
-        let shape = f16.shape
-        var data = Data(capacity: 4 + shape.count * 4 + shape.reduce(1, *) * 2)
+        let i32 = array.asType(.int32)
+        eval(i32)
+        let shape = i32.shape
+        var data = Data(capacity: 4 + 4 + shape.count * 4 + shape.reduce(1, *) * 4)
+        data.append(contentsOf: magic)
         var ndim = Int32(shape.count)
         data.append(Data(bytes: &ndim, count: 4))
         for dim in shape {
             var d = Int32(dim)
             data.append(Data(bytes: &d, count: 4))
         }
-        let values = f16.asArray(Float16.self)
+        let values = i32.asArray(Int32.self)
         values.withUnsafeBytes { data.append(contentsOf: $0) }
         return data
     }
 
     static func decode(_ data: Data) -> MLXArray? {
-        guard data.count >= 4 else { return nil }
-        let ndim = Int(data.withUnsafeBytes { $0.load(fromByteOffset: 0, as: Int32.self) })
-        let headerSize = 4 + ndim * 4
+        guard data.count >= 8 else { return nil }
+        let header = data.prefix(4)
+        guard header.elementsEqual(magic) else { return nil }
+        let ndim = Int(data.withUnsafeBytes { $0.load(fromByteOffset: 4, as: Int32.self) })
+        let headerSize = 4 + 4 + ndim * 4
         guard data.count > headerSize else { return nil }
         var shape: [Int] = []
         for i in 0..<ndim {
-            let dim = data.withUnsafeBytes { $0.load(fromByteOffset: 4 + i * 4, as: Int32.self) }
+            let dim = data.withUnsafeBytes { $0.load(fromByteOffset: 8 + i * 4, as: Int32.self) }
             shape.append(Int(dim))
         }
         let totalElements = shape.reduce(1, *)
         let body = data.subdata(in: headerSize..<data.count)
-        guard body.count == totalElements * 2 else { return nil }
-        let values = body.withUnsafeBytes { Array($0.bindMemory(to: Float16.self)) }
-        return MLXArray(values, shape).asType(.bfloat16)
+        guard body.count == totalElements * 4 else { return nil }
+        let values = body.withUnsafeBytes { Array($0.bindMemory(to: Int32.self)) }
+        return MLXArray(values, shape)
     }
 }
 
