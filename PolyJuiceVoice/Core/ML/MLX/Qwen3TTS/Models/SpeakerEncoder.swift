@@ -26,13 +26,22 @@ private func reverseAxis(_ x: MLXArray, axis: Int) -> MLXArray {
 func reflectPad1d(_ x: MLXArray, pad: Int) -> MLXArray {
     guard pad > 0 else { return x }
 
+    let timeLen = x.dim(1)
+
+    // Reflect padding requires timeLen > pad to produce valid left/right slices.
+    // When the sequence is too short, fall back to zero padding so downstream
+    // Conv1d (kernel ≥ 1) still receives a sequence of the expected padded length.
+    guard timeLen > pad else {
+        let zeroPad = MLX.zeros([x.dim(0), pad, x.dim(2)], dtype: x.dtype)
+        return MLX.concatenated([zeroPad, x, zeroPad], axis: 1)
+    }
+
     // Reflect: mirror without repeating the boundary element
     // left = x[:, 1:pad+1, :][:, ::-1, :]
     let leftSlice = x[0..., 1..<(pad + 1), 0...]
     let left = reverseAxis(leftSlice, axis: 1)
 
     // right = x[:, -(pad+1):-1, :][:, ::-1, :]
-    let timeLen = x.dim(1)
     let rightSlice = x[0..., (timeLen - pad - 1)..<(timeLen - 1), 0...]
     let right = reverseAxis(rightSlice, axis: 1)
 
