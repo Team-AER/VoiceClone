@@ -10,8 +10,6 @@
     <true/>
     <key>com.apple.security.network.client</key>
     <true/>
-    <key>com.apple.security.files.downloads.read-write</key>
-    <true/>
     <!-- iCloud sync (opt-in). Also enable via Xcode → Signing & Capabilities
          → iCloud for both targets (adds these automatically for iOS too). -->
     <key>com.apple.developer.icloud-container-identifiers</key>
