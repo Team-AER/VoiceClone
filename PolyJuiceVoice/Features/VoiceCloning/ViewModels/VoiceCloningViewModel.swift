@@ -178,6 +178,21 @@ final class VoiceCloningViewModel: ObservableObject {
         }
     }
 
+    /// Accept a dropped or picked audio file and adopt it as the reference
+    /// recording. Decodes/resamples to the same 24 kHz mono PCM16 WAV the
+    /// recorder produces so the rest of the pipeline can't tell them apart.
+    func importReferenceFile(at url: URL) async {
+        if isRecording { return }
+        do {
+            let imported = try AudioImporter.importAsReferenceWAV(from: url)
+            referenceAudioURL = imported.url
+            referenceAudioData = imported.data
+            hasReferenceAudio = true
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     func synthesize() async {
         guard let tts = ttsService, let audioData = referenceAudioData else { return }
 

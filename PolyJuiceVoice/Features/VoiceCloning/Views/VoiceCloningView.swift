@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct VoiceCloningView: View {
 
@@ -16,6 +17,7 @@ struct VoiceCloningView: View {
     @State private var showingSaveSheet = false
     @State private var saveVoiceName = ""
     @State private var showingPermissionPrompt = false
+    @State private var isDropTargeted = false
 
     var body: some View {
         NavigationStack {
@@ -136,7 +138,7 @@ struct VoiceCloningView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(statusText)
                             .fontWeight(.medium)
-                        Text("\(viewModel.recordingTime, format: .number.precision(.fractionLength(1)))s")
+                        Text(detailText)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -147,12 +149,34 @@ struct VoiceCloningView: View {
                 }
             }
         }
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                .opacity(isDropTargeted ? 1 : 0)
+                .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
+                .allowsHitTesting(false)
+        )
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !viewModel.isRecording, let url = urls.first else { return false }
+            Task { await viewModel.importReferenceFile(at: url) }
+            return true
+        } isTargeted: { targeted in
+            isDropTargeted = targeted && !viewModel.isRecording
+        }
     }
 
     private var statusText: String {
         if viewModel.isRecording { return "Recording…" }
         if viewModel.hasReferenceAudio { return "Reference captured" }
         return "Tap to record"
+    }
+
+    private var detailText: String {
+        if viewModel.isRecording || viewModel.recordingTime > 0 {
+            return String(format: "%.1fs", viewModel.recordingTime)
+        }
+        if viewModel.hasReferenceAudio { return "Imported audio" }
+        return "or drop an audio file"
     }
 
     private var levelMeter: some View {
