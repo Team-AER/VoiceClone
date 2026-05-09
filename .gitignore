@@ -33,9 +33,10 @@ xcuserdata/
 .build/
 Packages/
 Package.pins
-Package.resolved
 .swiftpm/
-*.xcodeproj/xcshareddata/swiftpm/
+*.xcodeproj/xcshareddata/swiftpm/configuration/
+# Note: Package.resolved and xcshareddata/swiftpm/Package.resolved are intentionally
+# tracked so Xcode Cloud (with automatic dependency resolution disabled) can build.
 
 # CocoaPods
 Pods/
