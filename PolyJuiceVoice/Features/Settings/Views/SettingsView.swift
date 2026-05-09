@@ -11,6 +11,7 @@
 //  inconsistent section spacing. Custom cards keep every row identical.
 //
 
+import AVFoundation
 import SwiftUI
 
 struct SettingsView: View {
@@ -18,6 +19,7 @@ struct SettingsView: View {
     @EnvironmentObject private var downloadManager: ModelDownloadManager
     @ObservedObject private var iCloudSettings = ICloudSyncSettings.shared
     @State private var showingModelManager = false
+    @State private var microphoneAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio)
 
     var body: some View {
         NavigationStack {
@@ -81,14 +83,7 @@ struct SettingsView: View {
                         }
 
                         section(title: "Permissions") {
-                            actionRow(
-                                title: "Microphone access",
-                                subtitle: "Open System Settings to grant permission for Clone.",
-                                icon: "mic",
-                                tint: .red,
-                                accessory: .external,
-                                action: { SystemSettings.openMicrophoneSettings() }
-                            )
+                            microphonePermissionRow
                             .background(rowGroupSurface)
                         }
 
@@ -131,6 +126,9 @@ struct SettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .navigationTitle("Settings")
+            .onAppear {
+                refreshMicrophonePermissionStatus()
+            }
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -192,6 +190,28 @@ struct SettingsView: View {
                        accessory: accessory)
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var microphonePermissionRow: some View {
+        if canOpenMicrophoneSettings {
+            actionRow(
+                title: "Microphone access",
+                subtitle: microphonePermissionSubtitle,
+                icon: "mic",
+                tint: .red,
+                accessory: .external,
+                action: { SystemSettings.openMicrophoneSettings() }
+            )
+        } else {
+            rowContent(
+                title: "Microphone access",
+                subtitle: microphonePermissionSubtitle,
+                icon: "mic",
+                tint: .red,
+                accessory: .none
+            )
+        }
     }
 
     private func infoRow(title: String,
@@ -274,6 +294,29 @@ struct SettingsView: View {
     private var totalDiskUsage: String {
         let total = downloadManager.snapshotDiskUsage.values.reduce(Int64(0), +)
         return DiskSpace.format(total)
+    }
+
+    private var canOpenMicrophoneSettings: Bool {
+        microphoneAuthorizationStatus == .denied || microphoneAuthorizationStatus == .restricted
+    }
+
+    private var microphonePermissionSubtitle: String {
+        switch microphoneAuthorizationStatus {
+        case .authorized:
+            return "Allowed for Clone recordings."
+        case .notDetermined:
+            return "Permission is requested when you start a reference recording."
+        case .denied:
+            return "Access is off. Open Settings to enable Clone recordings."
+        case .restricted:
+            return "Access is restricted. Open Settings to review microphone access."
+        @unknown default:
+            return "Permission is requested when you start a reference recording."
+        }
+    }
+
+    private func refreshMicrophonePermissionStatus() {
+        microphoneAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio)
     }
 }
 

@@ -115,8 +115,17 @@ final class AudioRecorder: ObservableObject {
     // MARK: - Private
 
     private func requestMicrophonePermission() async throws {
-        let granted = await AVCaptureDevice.requestAccess(for: .audio)
-        guard granted else {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            guard granted else {
+                throw RecordingError.permissionDenied
+            }
+        case .denied, .restricted:
+            throw RecordingError.permissionDenied
+        @unknown default:
             throw RecordingError.permissionDenied
         }
     }

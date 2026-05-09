@@ -51,6 +51,9 @@ struct VoiceCloningView: View {
             }
             .navigationTitle("Clone")
             .toolbar { toolbarContent }
+            .onAppear {
+                viewModel.refreshMicrophonePermissionStatus()
+            }
             .task {
                 await viewModel.setup(
                     ttsService: container.ttsService,
@@ -61,7 +64,7 @@ struct VoiceCloningView: View {
                 )
             }
             .alert("Error", isPresented: errorBinding) {
-                if (viewModel.error ?? "").localizedCaseInsensitiveContains("microphone") {
+                if viewModel.isMicrophonePermissionDenied {
                     Button("Open Settings") {
                         SystemSettings.openMicrophoneSettings()
                         viewModel.clearError()

@@ -3,6 +3,7 @@
 //  PolyJuiceVoice
 //
 
+import AVFoundation
 import Combine
 import Foundation
 
@@ -24,6 +25,7 @@ final class VoiceCloningViewModel: ObservableObject {
     @Published private(set) var waveformSamples: [Float] = []
     @Published private(set) var error: String?
     @Published private(set) var exportURL: URL?
+    @Published private(set) var isMicrophonePermissionDenied = false
 
     /// When non-nil, the user hasn't configured a model for voice cloning yet
     /// (or the one they picked has been deleted). View shows
@@ -126,6 +128,8 @@ final class VoiceCloningViewModel: ObservableObject {
                 self?.refreshUnconfiguredCapability()
             }
             .store(in: &cancellables)
+
+        refreshMicrophonePermissionStatus()
     }
 
     private func refreshUnconfiguredCapability() {
@@ -171,7 +175,9 @@ final class VoiceCloningViewModel: ObservableObject {
                 do {
                     referenceAudioURL = try await recorder.startRecording()
                     hasReferenceAudio = false
+                    refreshMicrophonePermissionStatus()
                 } catch {
+                    refreshMicrophonePermissionStatus()
                     self.error = error.localizedDescription
                 }
             }
@@ -358,6 +364,11 @@ final class VoiceCloningViewModel: ObservableObject {
 
     func clearError() {
         error = nil
+    }
+
+    func refreshMicrophonePermissionStatus() {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        isMicrophonePermissionDenied = status == .denied || status == .restricted
     }
 
     func export() {
